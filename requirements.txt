@@ -1,0 +1,21 @@
+# Binance API Client
+python-binance>=1.0.19
+
+# Data Analysis
+pandas>=2.1.0
+numpy>=1.24.0,<2.0.0
+
+# Technical Analysis Indicators
+ta>=0.11.0
+
+# Environment Variables
+python-dotenv>=1.0.0
+
+# HTTP Requests
+requests>=2.31.0
+
+# Additional dependencies for compatibility
+urllib3>=1.26.0,<2.0.0
+
+# Web Dashboard (optional)
+flask>=2.3.0
