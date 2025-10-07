@@ -138,16 +138,127 @@ Only recommend BUY/SELL if you're >70% confident. Otherwise say HOLD."""
             'key_points': []
         }
     
-    def batch_analyze(self, articles, max_articles=10):
+    def batch_analyze_comprehensive(self, articles, max_articles=5):
         """
-        Analyze multiple articles and aggregate results
+        Analyze ALL articles in ONE OpenAI call for comprehensive trading decision
+        Much more efficient and provides better context to AI
         
         Args:
-            articles: List of article dicts
-            max_articles: Maximum articles to analyze (cost control)
+            articles: List of article dicts with title, description, content, url
+            max_articles: Max articles to include (default 5)
             
         Returns:
-            Dict with aggregated analysis
+            Dict with comprehensive trading decision
+        """
+        if not self.client:
+            logger.error("OpenAI client not initialized")
+            return self._default_analysis()
+        
+        if not articles:
+            return self._default_analysis()
+        
+        # Limit articles
+        articles_to_analyze = articles[:max_articles]
+        
+        # Build comprehensive prompt with ALL articles
+        articles_text = ""
+        for i, article in enumerate(articles_to_analyze, 1):
+            articles_text += f"""
+---ARTICLE {i}---
+Title: {article.get('title', '')}
+Source: {article.get('source', 'Unknown')}
+Date: {article.get('date', '')}
+Content: {article.get('text', article.get('description', ''))}
+URL: {article.get('news_url', article.get('url', ''))}
+Sentiment (pre-tagged): {article.get('sentiment', 'Unknown')}
+Mentioned Tickers: {', '.join(article.get('tickers', []))}
+
+"""
+        
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": """You are an expert cryptocurrency trader analyzing multiple news articles to make ONE trading decision.
+
+Analyze ALL articles together, considering:
+1. Overall market sentiment across all news
+2. Which coins are most mentioned
+3. Correlation between articles
+4. Urgency and impact of news
+5. Conflicting signals
+
+Return JSON with:
+{
+    "signal": "BUY" | "SELL" | "HOLD",
+    "confidence": 0-100,
+    "recommended_coin": "BTCUSDT" | "ETHUSDT" | "XRPUSDT",
+    "sentiment": "bullish" | "bearish" | "neutral",
+    "impact": "high" | "medium" | "low",
+    "urgency": "immediate" | "short-term" | "long-term",
+    "reasoning": "Brief explanation of why this decision based on all articles",
+    "key_articles": [1, 2] (indices of most important articles),
+    "risk_level": "high" | "medium" | "low"
+}
+
+IMPORTANT:
+- Consider ALL articles together, not individually
+- Pick the SINGLE best trading opportunity
+- If news is mixed or unclear, return HOLD
+- Focus on BTC, ETH, XRP only"""
+                    },
+                    {
+                        "role": "user",
+                        "content": f"""Analyze these {len(articles_to_analyze)} crypto news articles and provide ONE trading decision:
+
+{articles_text}
+
+What should I do? Provide comprehensive analysis in JSON format."""
+                    }
+                ],
+                temperature=0.3,
+                max_tokens=500
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            
+            # Extract JSON
+            if '```json' in result_text:
+                result_text = result_text.split('```json')[1].split('```')[0].strip()
+            elif '```' in result_text:
+                result_text = result_text.split('```')[1].split('```')[0].strip()
+            
+            analysis = json.loads(result_text)
+            
+            # Ensure required fields
+            return {
+                'signal': analysis.get('signal', 'HOLD'),
+                'confidence': analysis.get('confidence', 50),
+                'recommended_symbol': analysis.get('recommended_coin', 'BTCUSDT'),
+                'sentiment': analysis.get('sentiment', 'neutral'),
+                'impact': analysis.get('impact', 'medium'),
+                'urgency': analysis.get('urgency', 'long-term'),
+                'reasoning': analysis.get('reasoning', 'Comprehensive analysis complete'),
+                'risk_level': analysis.get('risk_level', 'medium'),
+                'key_articles': analysis.get('key_articles', []),
+                'articles_analyzed': len(articles_to_analyze),
+                'symbols': [analysis.get('recommended_coin', 'BTCUSDT')]
+            }
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse AI response: {e}")
+            logger.error(f"Response was: {result_text}")
+            return self._default_analysis()
+        except Exception as e:
+            logger.error(f"Error in batch analysis: {e}")
+            return self._default_analysis()
+    
+    def batch_analyze(self, articles, max_articles=10):
+        """
+        OLD METHOD: Analyze multiple articles individually
+        DEPRECATED: Use batch_analyze_comprehensive instead for efficiency
         """
         if not articles:
             return self._default_analysis()

@@ -146,7 +146,7 @@ class NewsMonitor:
             # Focus on major coins only: BTC, ETH, XRP
             params = {
                 'tickers': 'BTC,ETH,XRP',  # Only track these 3 major coins
-                'items': items,
+                'items': 10,  # Fetch only 10 articles (we'll use ~5 for analysis)
                 'page': 1,
                 'token': self.cryptonews_key
             }
