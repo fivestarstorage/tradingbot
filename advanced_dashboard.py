@@ -38,12 +38,15 @@ class BotManager:
             with open(self.bots_file, 'r') as f:
                 bots = json.load(f)
             
-            # Check actual screen session status
+            # Check actual screen session status and get position details
             for bot in bots:
                 actual_status = self._check_bot_running(bot['id'])
                 if actual_status != bot['status']:
                     # Update status to match reality
                     bot['status'] = actual_status
+                
+                # Add position details
+                bot['position'] = self.get_bot_position(bot['id'])
             
             # Save corrected statuses
             self.save_bots(bots)
@@ -51,6 +54,84 @@ class BotManager:
             return bots
         except:
             return []
+    
+    def get_bot_position(self, bot_id):
+        """Extract current position details from bot logs"""
+        log_file = f'bot_{bot_id}.log'
+        
+        if not os.path.exists(log_file):
+            return None
+        
+        try:
+            # Read last 100 lines of log
+            with open(log_file, 'r') as f:
+                lines = f.readlines()[-100:]
+            
+            position_info = {
+                'has_position': False,
+                'symbol': None,
+                'entry_price': None,
+                'current_price': None,
+                'pnl_pct': 0,
+                'stop_loss': None,
+                'take_profit': None,
+                'ai_reasoning': None,
+                'news_headline': None,
+                'time_held': None
+            }
+            
+            # Parse logs for position info
+            for line in reversed(lines):
+                # Check for open position
+                if 'OPENED POSITION' in line or '📍 Position set' in line:
+                    position_info['has_position'] = True
+                    # Extract entry price
+                    if '@' in line and '$' in line:
+                        try:
+                            price_str = line.split('$')[1].split()[0]
+                            position_info['entry_price'] = float(price_str)
+                        except:
+                            pass
+                
+                # Check for closed position
+                if 'CLOSED POSITION' in line or '✅ Position cleared' in line:
+                    position_info['has_position'] = False
+                    break
+                
+                # Extract current symbol
+                if 'Symbol:' in line:
+                    try:
+                        position_info['symbol'] = line.split('Symbol:')[1].strip().split()[0]
+                    except:
+                        pass
+                
+                # Extract current P&L
+                if 'P&L:' in line:
+                    try:
+                        pnl_str = line.split('P&L:')[1].strip().split('%')[0]
+                        position_info['pnl_pct'] = float(pnl_str.replace('+', ''))
+                    except:
+                        pass
+                
+                # Extract current price
+                if 'Current:' in line and '$' in line:
+                    try:
+                        price_str = line.split('$')[1].split()[0]
+                        position_info['current_price'] = float(price_str)
+                    except:
+                        pass
+                
+                # Extract AI reasoning
+                if 'AI chose' in line or 'AI recommends' in line:
+                    try:
+                        position_info['ai_reasoning'] = line.split('|')[-1].strip()
+                    except:
+                        pass
+            
+            return position_info if position_info['has_position'] else None
+        except Exception as e:
+            print(f"Error reading bot position: {e}")
+            return None
     
     def _check_bot_running(self, bot_id):
         """Check if bot screen session actually exists"""
@@ -672,6 +753,55 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             font-weight: bold;
         }
         
+        .position-panel {
+            background: linear-gradient(135deg, #1a1a2e 0%, #0f0f1e 100%);
+            border: 1px solid #2a2a3e;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        
+        .position-header {
+            font-weight: bold;
+            color: #4caf50;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .position-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            font-size: 0.9em;
+        }
+        
+        .position-detail {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+        }
+        
+        .position-detail .label {
+            color: #888;
+        }
+        
+        .position-detail .value {
+            font-weight: bold;
+            color: #fff;
+        }
+        
+        .ai-reasoning {
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(76, 175, 80, 0.1);
+            border-left: 3px solid #4caf50;
+            border-radius: 4px;
+            font-size: 0.85em;
+            color: #aaa;
+        }
+        
         .bot-controls {
             display: flex;
             gap: 10px;
@@ -1053,6 +1183,39 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                             </div>
                         </div>
                     </div>
+                    
+                    ${bot.position ? `
+                    <div class="position-panel">
+                        <div class="position-header">
+                            📊 ACTIVE POSITION
+                        </div>
+                        <div class="position-details">
+                            <div class="position-detail">
+                                <span class="label">Symbol:</span>
+                                <span class="value">${bot.position.symbol || bot.symbol}</span>
+                            </div>
+                            <div class="position-detail">
+                                <span class="label">Entry:</span>
+                                <span class="value">$${bot.position.entry_price?.toFixed(2) || 'N/A'}</span>
+                            </div>
+                            <div class="position-detail">
+                                <span class="label">Current:</span>
+                                <span class="value">$${bot.position.current_price?.toFixed(2) || 'N/A'}</span>
+                            </div>
+                            <div class="position-detail">
+                                <span class="label">P&L:</span>
+                                <span class="value" style="color: ${bot.position.pnl_pct >= 0 ? '#4caf50' : '#f44336'}">
+                                    ${bot.position.pnl_pct >= 0 ? '+' : ''}${bot.position.pnl_pct.toFixed(2)}%
+                                </span>
+                            </div>
+                        </div>
+                        ${bot.position.ai_reasoning ? `
+                        <div class="ai-reasoning">
+                            <strong>🤖 AI:</strong> ${bot.position.ai_reasoning}
+                        </div>
+                        ` : ''}
+                    </div>
+                    ` : ''}
                     
                     <div class="bot-controls">
                         ${bot.status === 'stopped' 
