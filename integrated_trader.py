@@ -16,10 +16,12 @@ from strategies.volatile_coins_strategy import VolatileCoinsStrategy
 from strategies.mean_reversion_strategy import MeanReversionStrategy
 from strategies.breakout_strategy import BreakoutStrategy
 from strategies.conservative_strategy import ConservativeStrategy
+from strategies.ai_news_strategy import AINewsStrategy
 
 # Strategy mapping
 STRATEGIES = {
     'simple_profitable': SimpleProfitableStrategy,
+    'ai_news': AINewsStrategy,
     'momentum': EnhancedStrategy,
     'mean_reversion': MeanReversionStrategy,
     'breakout': BreakoutStrategy,

@@ -739,6 +739,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <label>Strategy</label>
                 <select id="bot-strategy">
                     <option value="simple_profitable">Simple Profitable (Recommended)</option>
+                    <option value="ai_news">🤖 AI News Trading (GPT-4)</option>
                     <option value="momentum">Momentum</option>
                     <option value="mean_reversion">Mean Reversion</option>
                     <option value="breakout">Breakout</option>
