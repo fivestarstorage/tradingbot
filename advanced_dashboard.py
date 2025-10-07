@@ -731,13 +731,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
             
             <div class="form-group">
-                <label>Trading Symbol</label>
-                <input type="text" id="bot-symbol" placeholder="e.g. BTCUSDT" value="BTCUSDT">
-            </div>
-            
-            <div class="form-group">
                 <label>Strategy</label>
-                <select id="bot-strategy">
+                <select id="bot-strategy" onchange="updateSymbolHelp()">
                     <option value="simple_profitable">Simple Profitable (Recommended)</option>
                     <option value="ai_autonomous">🤖 AI Autonomous (AI Picks Coin!)</option>
                     <option value="ai_news">🤖 AI News Trading (Single Coin)</option>
@@ -750,8 +745,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
             
             <div class="form-group">
-                <label>Trade Amount (USDT)</label>
+                <label>Trading Symbol <span id="symbol-help" style="color: #888; font-size: 0.85em;"></span></label>
+                <input type="text" id="bot-symbol" placeholder="e.g. BTCUSDT" value="BTCUSDT">
+            </div>
+            
+            <div class="form-group">
+                <label>Trade Amount (USDT) <span style="color: #888; font-size: 0.85em;">- Money to spend per trade</span></label>
                 <input type="number" id="bot-amount" placeholder="100" value="100">
+                <div style="color: #888; font-size: 0.8em; margin-top: 5px;">
+                    Example: $100 = Bot spends $100 each time it buys crypto
+                </div>
             </div>
             
             <div class="form-actions">
@@ -918,9 +921,26 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             `).reverse().join('');
         }
         
+        // Update symbol help text based on strategy
+        function updateSymbolHelp() {
+            const strategy = document.getElementById('bot-strategy').value;
+            const helpText = document.getElementById('symbol-help');
+            
+            if (strategy === 'ai_autonomous') {
+                helpText.textContent = '(ignored - AI picks the coin!)';
+                helpText.style.color = '#f39c12';
+            } else if (strategy === 'ai_news') {
+                helpText.textContent = '(which coin to monitor)';
+                helpText.style.color = '#888';
+            } else {
+                helpText.textContent = '';
+            }
+        }
+        
         // Show/hide modals
         function showAddBotModal() {
             document.getElementById('add-bot-modal').style.display = 'flex';
+            updateSymbolHelp(); // Initialize help text
         }
         
         function hideAddBotModal() {
