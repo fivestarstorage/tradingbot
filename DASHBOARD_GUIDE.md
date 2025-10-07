@@ -156,27 +156,41 @@ Bot 3: SOL Breakout
 
 ## Important Notes
 
-### Current Limitations
+### ✅ LIVE TRADING ENABLED!
 
-⚠️ **This dashboard currently manages bot CONFIGURATION only**
+🎉 **The dashboard now controls REAL trading bots!**
 
-- **Start/Stop buttons**: Currently update bot status in the dashboard
-- **Actual trading**: Still requires running `live_trader.py` separately
-- **Bot execution**: Not yet integrated with the dashboard
+- **▶ Start Button**: Spawns actual trading process with real orders
+- **⏹ Stop Button**: Stops the trading process immediately
+- **Bot Status**: Shows if bot is actually running or stopped
+- **Real-Time Data**: Shows actual balance and live trades
 
-### Next Steps for Full Integration
+### How It Works
 
-To make bots actually trade from the dashboard:
-1. Each bot needs its own `live_trader.py` process
-2. Dashboard needs to spawn/kill these processes
-3. Requires process management (supervisord or pm2)
+When you click **▶ Start**:
+1. Dashboard spawns a `screen` session: `bot_1`, `bot_2`, etc.
+2. Each bot runs independently with its own strategy
+3. Bots place REAL orders on Binance
+4. You can monitor logs: `screen -r bot_1`
 
-### Current Workflow
+When you click **⏹ Stop**:
+1. Dashboard kills the bot's screen session
+2. Trading stops immediately
+3. Any open positions remain (close manually if needed)
 
-**For now:**
-1. Use dashboard to **configure** and **monitor** bots
-2. Use `live_trader.py` to **actually run** trades
-3. Dashboard shows balance and trades from running bot
+### View Bot Logs
+
+```bash
+# List all running bots
+screen -ls
+
+# View bot logs
+screen -r bot_1     # Bot ID 1
+screen -r bot_2     # Bot ID 2
+
+# Detach from logs (leave bot running)
+# Press: Ctrl+A then D
+```
 
 ---
 

@@ -83,15 +83,72 @@ class BotManager:
         self.save_bots(bots)
     
     def get_account_info(self):
-        """Get current account balance"""
-        balance = self.client.get_account_balance('USDT')
+        """Get current account balance - shows ALL assets"""
+        try:
+            # Get all balances
+            account = self.client.client.get_account()
+            
+            total_value_usdt = 0.0
+            total_locked_usdt = 0.0
+            balances_list = []
+            
+            for balance in account['balances']:
+                free = float(balance['free'])
+                locked = float(balance['locked'])
+                
+                if free > 0 or locked > 0:
+                    asset = balance['asset']
+                    
+                    # Convert to USDT value
+                    if asset == 'USDT':
+                        value_usdt = free + locked
+                        free_usdt = free
+                        locked_usdt = locked
+                    else:
+                        # Get current price in USDT
+                        try:
+                            symbol = f"{asset}USDT"
+                            price = self.client.get_current_price(symbol)
+                            if price:
+                                value_usdt = (free + locked) * price
+                                free_usdt = free * price
+                                locked_usdt = locked * price
+                            else:
+                                continue
+                        except:
+                            continue
+                    
+                    total_value_usdt += value_usdt
+                    total_locked_usdt += locked_usdt
+                    
+                    balances_list.append({
+                        'asset': asset,
+                        'free': free,
+                        'locked': locked,
+                        'value_usdt': value_usdt
+                    })
+            
+            # Sort by value (highest first)
+            balances_list.sort(key=lambda x: x['value_usdt'], reverse=True)
+            
+            return {
+                'available': total_value_usdt - total_locked_usdt,
+                'locked': total_locked_usdt,
+                'total': total_value_usdt,
+                'mode': 'TESTNET' if Config.USE_TESTNET else 'MAINNET',
+                'balances': balances_list[:10]  # Top 10 assets
+            }
         
-        return {
-            'available': balance['free'] if balance else 0,
-            'locked': balance['locked'] if balance else 0,
-            'total': (balance['free'] + balance['locked']) if balance else 0,
-            'mode': 'TESTNET' if Config.USE_TESTNET else 'MAINNET'
-        }
+        except Exception as e:
+            print(f"Error getting account info: {e}")
+            return {
+                'available': 0,
+                'locked': 0,
+                'total': 0,
+                'mode': 'TESTNET' if Config.USE_TESTNET else 'MAINNET',
+                'balances': [],
+                'error': str(e)
+            }
     
     def get_recent_trades(self, limit=20):
         """Get recent trades from log files"""
@@ -610,22 +667,32 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div class="account-summary">
             <div class="summary-card">
                 <h3>💰 Available Balance</h3>
-                <div class="value" id="available">$0.00</div>
+                <div class="value" id="available">Loading...</div>
             </div>
             
             <div class="summary-card">
                 <h3>🔒 In Orders</h3>
-                <div class="value" id="locked">$0.00</div>
+                <div class="value" id="locked">Loading...</div>
             </div>
             
             <div class="summary-card">
                 <h3>💵 Total Balance</h3>
-                <div class="value" id="total">$0.00</div>
+                <div class="value" id="total">Loading...</div>
             </div>
             
             <div class="summary-card">
                 <h3>🤖 Allocated to Bots</h3>
                 <div class="value" id="allocated">$0.00</div>
+            </div>
+        </div>
+        
+        <!-- Asset Breakdown -->
+        <div class="section">
+            <div class="section-header">
+                <h2>💎 Your Assets</h2>
+            </div>
+            <div id="assets-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px;">
+                <div class="empty-state">Loading assets...</div>
             </div>
         </div>
         
@@ -726,6 +793,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 .then(result => {
                     if (!result.success) {
                         console.error('Error:', result.error);
+                        document.getElementById('available').textContent = 'Error';
+                        document.getElementById('locked').textContent = 'Error';
+                        document.getElementById('total').textContent = 'Error';
+                        document.getElementById('mode').textContent = 'ERROR';
                         return;
                     }
                     
@@ -738,13 +809,47 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     document.getElementById('allocated').textContent = '$' + result.total_allocated.toFixed(2);
                     document.getElementById('mode').textContent = result.account.mode;
                     
+                    // Show error if present
+                    if (result.account.error) {
+                        console.error('Account error:', result.account.error);
+                        alert('API Error: ' + result.account.error + '\n\nCheck your .env file and API keys!');
+                    }
+                    
+                    // Update assets
+                    renderAssets(result.account.balances || []);
+                    
                     // Update bots
                     renderBots(result.bots);
                     
                     // Update trades
                     renderTrades(result.trades);
                 })
-                .catch(error => console.error('Fetch error:', error));
+                .catch(error => {
+                    console.error('Fetch error:', error);
+                    document.getElementById('available').textContent = 'Connection Error';
+                    document.getElementById('locked').textContent = 'Connection Error';
+                    document.getElementById('total').textContent = 'Connection Error';
+                });
+        }
+        
+        // Render assets
+        function renderAssets(balances) {
+            const list = document.getElementById('assets-list');
+            
+            if (balances.length === 0) {
+                list.innerHTML = '<div class="empty-state">No assets found. Check API connection.</div>';
+                return;
+            }
+            
+            list.innerHTML = balances.map(bal => `
+                <div class="summary-card">
+                    <h3>${bal.asset}</h3>
+                    <div class="value" style="font-size: 1.3em;">${bal.free.toFixed(8)}</div>
+                    <div style="color: #888; font-size: 0.9em; margin-top: 5px;">
+                        ≈ $${bal.value_usdt.toFixed(2)}
+                    </div>
+                </div>
+            `).join('');
         }
         
         // Render bots
