@@ -82,6 +82,12 @@ class AIAutonomousStrategy:
         self.binance_client = client
         logger.info("✅ Binance client connected - can now validate ANY coin dynamically!")
     
+    def set_symbol(self, symbol):
+        """Force strategy to focus on a specific symbol (used when holding position)"""
+        logger.info(f"🔒 Strategy locked to {symbol} (position management mode)")
+        # This is called by integrated_trader when we have a position
+        # The strategy will respect this in generate_signal by checking current_position
+    
     def is_symbol_valid(self, symbol):
         """
         Check if a symbol is tradeable on Binance (with caching)

@@ -28,6 +28,9 @@ class BotManager:
             api_secret=Config.BINANCE_API_SECRET,
             testnet=Config.USE_TESTNET
         )
+        
+        # Auto-create bots for orphaned coins on startup
+        self._auto_create_bots_for_orphaned_coins()
     
     def get_bots(self):
         """Load all active bots from file and check real status"""
@@ -191,6 +194,83 @@ class BotManager:
         bots = self.get_bots()
         bots = [b for b in bots if b['id'] != bot_id]
         self.save_bots(bots)
+    
+    def _auto_create_bots_for_orphaned_coins(self):
+        """Auto-create bots for coins in wallet that aren't being managed"""
+        try:
+            print("\n🔍 Checking for orphaned coins...")
+            
+            # Get all account balances
+            account = self.client.client.get_account()
+            balances = account['balances']
+            
+            # Get existing bots
+            bots = self.get_bots()
+            managed_symbols = set()
+            for bot in bots:
+                symbol = bot['symbol']
+                coin = symbol.replace('USDT', '')
+                managed_symbols.add(coin)
+            
+            # Find coins with balance > 0 that aren't managed
+            orphaned_coins = []
+            for balance in balances:
+                asset = balance['asset']
+                free = float(balance['free'])
+                locked = float(balance['locked'])
+                total = free + locked
+                
+                # Skip USDT and coins with 0 balance
+                if asset == 'USDT' or total == 0:
+                    continue
+                
+                # Skip if already managed
+                if asset in managed_symbols:
+                    continue
+                
+                # Check if this coin can be traded on Binance
+                trading_symbol = f"{asset}USDT"
+                if self.client.is_symbol_tradeable(trading_symbol):
+                    orphaned_coins.append({
+                        'asset': asset,
+                        'symbol': trading_symbol,
+                        'balance': total
+                    })
+            
+            # Auto-create bots for orphaned coins
+            if orphaned_coins:
+                print(f"\n⚠️  Found {len(orphaned_coins)} orphaned coin(s):")
+                for coin in orphaned_coins:
+                    print(f"   • {coin['asset']}: {coin['balance']:.8f}")
+                
+                print(f"\n🤖 Auto-creating management bots...")
+                for coin in orphaned_coins:
+                    # Create a bot with AI Autonomous strategy (best for unknown coins)
+                    bot_name = f"Auto-Manager: {coin['asset']}"
+                    
+                    # Use a default trade amount of $100
+                    # (bot won't buy more, just manage existing position)
+                    new_bot = self.add_bot(
+                        name=bot_name,
+                        symbol=coin['symbol'],
+                        strategy='ai_autonomous',
+                        trade_amount=100.0
+                    )
+                    
+                    print(f"   ✅ Created: {bot_name} (Bot #{new_bot['id']})")
+                    print(f"      Symbol: {coin['symbol']}")
+                    print(f"      Strategy: AI Autonomous (will manage sell timing)")
+                
+                print(f"\n💡 Auto-created bots are STOPPED by default.")
+                print(f"   Start them via dashboard to begin management.")
+                print(f"   They will detect existing positions and manage them.\n")
+            else:
+                print("   ✅ All coins are already managed or have 0 balance\n")
+        
+        except Exception as e:
+            print(f"   ⚠️  Error checking orphaned coins: {e}\n")
+            import traceback
+            traceback.print_exc()
     
     def get_account_info(self):
         """Get current account balance - shows ALL assets"""

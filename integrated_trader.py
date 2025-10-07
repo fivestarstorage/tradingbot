@@ -146,6 +146,27 @@ class BotRunner:
         except Exception as e:
             self.logger.error(f"Error deleting position file: {e}")
     
+    def _update_bot_symbol(self, new_symbol):
+        """Update bot's symbol in active_bots.json when AI switches coins"""
+        try:
+            bots_file = 'active_bots.json'
+            if os.path.exists(bots_file):
+                with open(bots_file, 'r') as f:
+                    bots = json.load(f)
+                
+                # Find and update this bot
+                for bot in bots:
+                    if bot['id'] == self.bot_id:
+                        bot['symbol'] = new_symbol
+                        self.logger.info(f"✅ Updated bot config: {self.bot_name} → {new_symbol}")
+                        break
+                
+                # Save updated config
+                with open(bots_file, 'w') as f:
+                    json.dump(bots, f, indent=2)
+        except Exception as e:
+            self.logger.error(f"Error updating bot symbol: {e}")
+    
     def _check_orphaned_positions(self):
         """Check if we have coins in wallet that bot doesn't know about"""
         if self.position:
@@ -463,12 +484,25 @@ class BotRunner:
                 # For AI strategies, check if symbol should change
                 if 'recommended_symbol' in signal_data and signal_data['recommended_symbol'] != self.symbol:
                     new_symbol = signal_data['recommended_symbol']
-                    self.logger.info(f"🔄 AI switched to: {new_symbol}")
-                    self.symbol = new_symbol
-                    # Re-fetch data for new symbol
-                    data = self.get_data(limit=100)
-                    if data:
-                        current_price = float(data[-1][4])
+                    
+                    # Only switch if we DON'T have an active position
+                    if not self.position:
+                        self.logger.info(f"🔄 AI switching to new opportunity: {new_symbol}")
+                        self.symbol = new_symbol
+                        
+                        # Update bot configuration file with new symbol
+                        self._update_bot_symbol(new_symbol)
+                        
+                        # Re-fetch data for new symbol
+                        data = self.get_data(limit=100)
+                        if data:
+                            current_price = float(data[-1][4])
+                    else:
+                        # Already have a position - stay focused on current coin
+                        self.logger.info(f"📌 Staying focused on {self.symbol} (have position, ignoring {new_symbol})")
+                        # Tell AI strategy to keep monitoring current symbol
+                        if hasattr(self.strategy, 'set_symbol'):
+                            self.strategy.set_symbol(self.symbol)
                 
                 # Log status
                 if self.position:
