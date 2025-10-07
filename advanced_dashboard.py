@@ -408,6 +408,103 @@ def get_sentiment():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/coin/<symbol>')
+def get_coin_details(symbol):
+    """Get detailed information about a specific coin"""
+    try:
+        manager = BotManager()
+        
+        # Find which bots are managing this symbol
+        bots = manager.get_bots()
+        managing_bots = []
+        
+        for bot in bots:
+            if bot['symbol'].startswith(symbol) or bot['symbol'] == f"{symbol}USDT":
+                bot_info = {
+                    'id': bot['id'],
+                    'name': bot['name'],
+                    'status': bot['status'],
+                    'strategy': bot['strategy'],
+                    'position': bot.get('position', None)
+                }
+                managing_bots.append(bot_info)
+        
+        # Get current balance
+        coin_balance = manager.client.get_account_balance(symbol)
+        free_balance = float(coin_balance.get('free', 0)) if coin_balance else 0
+        locked_balance = float(coin_balance.get('locked', 0)) if coin_balance else 0
+        total_balance = free_balance + locked_balance
+        
+        # Get current price
+        trading_symbol = f"{symbol}USDT"
+        current_price = 0
+        try:
+            ticker = manager.client.client.get_symbol_ticker(symbol=trading_symbol)
+            current_price = float(ticker['price']) if ticker else 0
+        except:
+            pass
+        
+        # Calculate USDT value
+        usdt_value = total_balance * current_price
+        
+        # Get historical trades for this symbol
+        trade_history = []
+        import glob
+        log_files = glob.glob('bot_*.log')
+        
+        for log_file in log_files:
+            try:
+                with open(log_file, 'r') as f:
+                    lines = f.readlines()
+                
+                for line in lines[-200:]:  # Last 200 lines
+                    if symbol in line and ('BUY' in line or 'SELL' in line):
+                        trade_history.append(line.strip())
+            except:
+                pass
+        
+        # Load position files for more details
+        position_details = []
+        for bot in managing_bots:
+            position_file = f"bot_{bot['id']}_position.json"
+            if os.path.exists(position_file):
+                try:
+                    with open(position_file, 'r') as f:
+                        pos_data = json.load(f)
+                        position_details.append({
+                            'bot_id': bot['id'],
+                            'bot_name': bot['name'],
+                            **pos_data
+                        })
+                except:
+                    pass
+        
+        return jsonify({
+            'success': True,
+            'symbol': symbol,
+            'balance': {
+                'free': free_balance,
+                'locked': locked_balance,
+                'total': total_balance
+            },
+            'price': {
+                'current': current_price,
+                'usdt_value': usdt_value
+            },
+            'managing_bots': managing_bots,
+            'position_details': position_details,
+            'trade_history': trade_history[-10:],  # Last 10 trades
+            'is_being_managed': len(managing_bots) > 0
+        })
+    
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        })
+
 @app.route('/api/logs')
 def get_logs():
     """Get all bot logs with filtering"""
@@ -613,6 +710,17 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             padding: 20px;
             border-radius: 10px;
             border: 1px solid #2a2a3e;
+        }
+        
+        .summary-card.clickable {
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .summary-card.clickable:hover {
+            transform: translateY(-2px);
+            border-color: #667eea;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
         }
         
         .summary-card h3 {
@@ -1141,6 +1249,24 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
     </div>
     
+    <!-- Coin Details Modal -->
+    <div class="modal" id="coin-details-modal">
+        <div class="modal-content" style="max-width: 800px;">
+            <h2 id="coin-modal-title">💎 Coin Details</h2>
+            
+            <div id="coin-modal-body">
+                <!-- Dynamic content loaded here -->
+                <div style="text-align: center; padding: 40px; color: #888;">
+                    Loading coin details...
+                </div>
+            </div>
+            
+            <div class="form-actions" style="margin-top: 20px;">
+                <button class="btn btn-secondary" onclick="hideCoinModal()">Close</button>
+            </div>
+        </div>
+    </div>
+    
     <script>
         let currentData = {};
         
@@ -1200,8 +1326,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }
             
             list.innerHTML = balances.map(bal => `
-                <div class="summary-card">
-                    <h3>${bal.asset}</h3>
+                <div class="summary-card clickable" onclick="showCoinDetails('${bal.asset}')">
+                    <h3>${bal.asset} <span style="font-size: 0.8em; color: #667eea;">🔍 Click for details</span></h3>
                     <div class="value" style="font-size: 1.3em;">${bal.free.toFixed(8)}</div>
                     <div style="color: #888; font-size: 0.9em; margin-top: 5px;">
                         ≈ $${bal.value_usdt.toFixed(2)}
@@ -1453,6 +1579,175 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         alert('Error: ' + result.error);
                     }
                 });
+        }
+        
+        // Show/hide coin details modal
+        function showCoinDetails(symbol) {
+            document.getElementById('coin-details-modal').style.display = 'flex';
+            document.getElementById('coin-modal-title').textContent = `💎 ${symbol} Details`;
+            document.getElementById('coin-modal-body').innerHTML = `
+                <div style="text-align: center; padding: 40px; color: #888;">
+                    <div class="spinner"></div>
+                    Loading ${symbol} details...
+                </div>
+            `;
+            
+            // Fetch coin details
+            fetch(`/api/coin/${symbol}`)
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        renderCoinDetails(result);
+                    } else {
+                        document.getElementById('coin-modal-body').innerHTML = `
+                            <div style="text-align: center; padding: 40px; color: #f44336;">
+                                ❌ Error loading coin details: ${result.error}
+                            </div>
+                        `;
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('coin-modal-body').innerHTML = `
+                        <div style="text-align: center; padding: 40px; color: #f44336;">
+                            ❌ Connection error: ${error.message}
+                        </div>
+                    `;
+                });
+        }
+        
+        function hideCoinModal() {
+            document.getElementById('coin-details-modal').style.display = 'none';
+        }
+        
+        function renderCoinDetails(data) {
+            const modalBody = document.getElementById('coin-modal-body');
+            
+            // Calculate P&L if there's a position
+            let pnlHtml = '';
+            if (data.position_details && data.position_details.length > 0) {
+                const pos = data.position_details[0];
+                const currentPrice = data.price.current;
+                const entryPrice = pos.entry_price || 0;
+                const pnl = ((currentPrice - entryPrice) / entryPrice * 100).toFixed(2);
+                const pnlColor = pnl >= 0 ? '#4caf50' : '#f44336';
+                
+                pnlHtml = `
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-top: 15px; border: 1px solid ${pnl >= 0 ? '#4caf50' : '#f44336'};">
+                        <h4 style="margin: 0 0 10px 0;">📊 Position P&L</h4>
+                        <div style="font-size: 1.8em; font-weight: bold; color: ${pnlColor};">
+                            ${pnl >= 0 ? '+' : ''}${pnl}%
+                        </div>
+                        <div style="color: #888; margin-top: 5px;">
+                            Entry: $${entryPrice.toFixed(2)} → Current: $${currentPrice.toFixed(2)}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            modalBody.innerHTML = `
+                <!-- Balance Summary -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px;">
+                        <div style="color: #888; font-size: 0.9em; margin-bottom: 5px;">Total Balance</div>
+                        <div style="font-size: 1.3em; font-weight: bold;">${data.balance.total.toFixed(8)}</div>
+                        <div style="color: #888; font-size: 0.85em; margin-top: 3px;">${data.symbol}</div>
+                    </div>
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px;">
+                        <div style="color: #888; font-size: 0.9em; margin-bottom: 5px;">Current Price</div>
+                        <div style="font-size: 1.3em; font-weight: bold;">$${data.price.current.toFixed(2)}</div>
+                        <div style="color: #888; font-size: 0.85em; margin-top: 3px;">USDT</div>
+                    </div>
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px;">
+                        <div style="color: #888; font-size: 0.9em; margin-bottom: 5px;">Total Value</div>
+                        <div style="font-size: 1.3em; font-weight: bold; color: #4caf50;">$${data.price.usdt_value.toFixed(2)}</div>
+                        <div style="color: #888; font-size: 0.85em; margin-top: 3px;">USDT</div>
+                    </div>
+                </div>
+                
+                ${pnlHtml}
+                
+                <!-- Management Status -->
+                <div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-top: 15px;">
+                    <h4 style="margin: 0 0 10px 0;">🤖 Management Status</h4>
+                    ${data.is_being_managed ? `
+                        <div style="color: #4caf50; margin-bottom: 10px;">
+                            ✅ Currently managed by ${data.managing_bots.length} bot(s)
+                        </div>
+                        ${data.managing_bots.map(bot => `
+                            <div style="background: #16161f; padding: 10px; border-radius: 6px; margin-top: 8px; border-left: 3px solid #667eea;">
+                                <div style="font-weight: bold;">${bot.name}</div>
+                                <div style="color: #888; font-size: 0.9em; margin-top: 3px;">
+                                    Strategy: ${bot.strategy.replace('_', ' ').toUpperCase()} | 
+                                    Status: <span style="color: ${bot.status === 'running' ? '#4caf50' : '#f44336'};">
+                                        ${bot.status.toUpperCase()}
+                                    </span>
+                                </div>
+                                ${bot.position ? `
+                                    <div style="margin-top: 8px; padding: 8px; background: #0d0d15; border-radius: 4px;">
+                                        <div style="font-size: 0.85em; color: #888;">AI Reasoning:</div>
+                                        <div style="font-size: 0.9em; margin-top: 4px;">${bot.position.reasoning || 'No reasoning available'}</div>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `).join('')}
+                    ` : `
+                        <div style="color: #ff9800;">
+                            ⚠️ Not currently managed by any bot
+                        </div>
+                        <div style="color: #888; font-size: 0.9em; margin-top: 8px;">
+                            This coin is in your wallet but no active bot is managing it.
+                            Consider starting a bot or selling manually via Binance.
+                        </div>
+                    `}
+                </div>
+                
+                <!-- Position Details -->
+                ${data.position_details && data.position_details.length > 0 ? `
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-top: 15px;">
+                        <h4 style="margin: 0 0 10px 0;">📋 Position Details</h4>
+                        ${data.position_details.map(pos => `
+                            <div style="background: #16161f; padding: 10px; border-radius: 6px; margin-top: 8px;">
+                                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; font-size: 0.9em;">
+                                    <div>
+                                        <span style="color: #888;">Entry Price:</span>
+                                        <span style="font-weight: bold; margin-left: 5px;">$${pos.entry_price?.toFixed(2) || 'N/A'}</span>
+                                    </div>
+                                    <div>
+                                        <span style="color: #888;">Stop Loss:</span>
+                                        <span style="font-weight: bold; margin-left: 5px; color: #f44336;">$${pos.stop_loss?.toFixed(2) || 'N/A'}</span>
+                                    </div>
+                                    <div>
+                                        <span style="color: #888;">Take Profit:</span>
+                                        <span style="font-weight: bold; margin-left: 5px; color: #4caf50;">$${pos.take_profit?.toFixed(2) || 'N/A'}</span>
+                                    </div>
+                                    <div>
+                                        <span style="color: #888;">Position:</span>
+                                        <span style="font-weight: bold; margin-left: 5px;">${pos.position || 'N/A'}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : ''}
+                
+                <!-- Recent Trades -->
+                ${data.trade_history && data.trade_history.length > 0 ? `
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-top: 15px;">
+                        <h4 style="margin: 0 0 10px 0;">📜 Recent Trade History</h4>
+                        <div style="max-height: 200px; overflow-y: auto;">
+                            ${data.trade_history.map(trade => `
+                                <div style="background: #16161f; padding: 8px; border-radius: 4px; margin-top: 6px; font-size: 0.85em; font-family: monospace;">
+                                    ${trade}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : `
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-top: 15px; text-align: center; color: #888;">
+                        No recent trade history for this coin
+                    </div>
+                `}
+            `;
         }
         
         // Close modal on outside click
