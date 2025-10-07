@@ -143,15 +143,16 @@ class NewsMonitor:
         try:
             # Use the correct CryptoNews API endpoint
             # According to docs: https://cryptonews-api.com/documentation
-            # Endpoint: /api/v1 with ?auth_token=XXX&items=50
+            # Endpoint: /api/v1/category?section=general&items=50&page=1&token=XXX
             params = {
-                'auth_token': self.cryptonews_key,
+                'section': 'general',  # General crypto news
                 'items': items,
-                'page': 1
+                'page': 1,
+                'token': self.cryptonews_key  # Use 'token' not 'auth_token'
             }
             
-            # Use base endpoint (not /news)
-            response = requests.get(self.cryptonews_url, params=params, timeout=15)
+            # Use /category endpoint
+            response = requests.get(f"{self.cryptonews_url}/category", params=params, timeout=15)
             response.raise_for_status()
             
             data = response.json()
