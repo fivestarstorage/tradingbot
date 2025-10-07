@@ -88,6 +88,11 @@ class BotRunner:
         self.trades_count = 0
         self.profit_total = 0.0
         
+        # Track if this bot has made any trades yet (for proper trade_amount logic)
+        # trade_amount = TOTAL investment, not per-trade amount
+        self.has_traded = False
+        self.initial_investment = 0.0
+        
         # Initialize SMS notifier
         self.sms_notifier = TwilioNotifier()
         
@@ -110,12 +115,16 @@ class BotRunner:
                     self.stop_loss = data.get('stop_loss')
                     self.take_profit = data.get('take_profit')
                     self.symbol = data.get('symbol', self.symbol)
+                    self.has_traded = data.get('has_traded', False)
+                    self.initial_investment = data.get('initial_investment', 0.0)
                     self.logger.info("=" * 70)
                     self.logger.info(f"📂 LOADED EXISTING POSITION FROM FILE")
                     self.logger.info(f"   Symbol: {self.symbol}")
                     self.logger.info(f"   Entry: ${self.entry_price:.2f}")
                     self.logger.info(f"   Stop Loss: ${self.stop_loss:.2f}")
                     self.logger.info(f"   Take Profit: ${self.take_profit:.2f}")
+                    if self.has_traded:
+                        self.logger.info(f"   Initial Investment: ${self.initial_investment:.2f}")
                     self.logger.info("=" * 70)
         except Exception as e:
             self.logger.error(f"Error loading position: {e}")
@@ -130,6 +139,8 @@ class BotRunner:
                 'stop_loss': self.stop_loss,
                 'take_profit': self.take_profit,
                 'symbol': self.symbol,
+                'has_traded': self.has_traded,
+                'initial_investment': self.initial_investment,
                 'timestamp': datetime.now().isoformat()
             }
             with open(self.position_file, 'w') as f:
@@ -205,11 +216,16 @@ class BotRunner:
                         self.stop_loss = current_price * 0.92  # 8% stop loss (wider since we don't know entry)
                         self.take_profit = current_price * 1.05  # 5% take profit
                         
+                        # Mark as traded (this is an existing position)
+                        self.has_traded = True
+                        self.initial_investment = self.trade_amount  # Assume initial investment was trade_amount
+                        
                         self.logger.info(f"📍 Tracking orphaned position:")
                         self.logger.info(f"   Current Price: ${current_price:.2f}")
                         self.logger.info(f"   Assumed Entry: ${self.entry_price:.2f} (est)")
                         self.logger.info(f"   Stop Loss: ${self.stop_loss:.2f}")
                         self.logger.info(f"   Take Profit: ${self.take_profit:.2f}")
+                        self.logger.info(f"   Initial Investment: ${self.initial_investment:.2f} (assumed)")
                         
                         # Save this tracked position
                         self._save_position()
@@ -292,39 +308,62 @@ class BotRunner:
                     self.logger.error(f"Error checking balance: {e}")
                     available_usdt = 0
                 
-                # Need at least trade_amount + 1% for fees
-                required_balance = self.trade_amount * 1.01
-                
-                if available_usdt < required_balance:
-                    self.logger.warning("=" * 70)
-                    self.logger.warning("⚠️  INSUFFICIENT USDT BALANCE - CANNOT TRADE")
-                    self.logger.warning("=" * 70)
-                    self.logger.warning(f"Required: ${required_balance:.2f} (includes 1% for fees)")
-                    self.logger.warning(f"Available: ${available_usdt:.2f}")
-                    self.logger.warning(f"Shortfall: ${required_balance - available_usdt:.2f}")
-                    self.logger.warning("")
-                    self.logger.warning("💡 Solutions:")
-                    self.logger.warning("   1. Add more USDT to your Binance account")
-                    self.logger.warning("   2. Reduce bot trade amount")
-                    self.logger.warning("   3. Sell existing coins to free up USDT")
-                    self.logger.warning("=" * 70)
+                # Determine how much to invest
+                if not self.has_traded:
+                    # FIRST TRADE: Use trade_amount as initial investment
+                    amount_to_invest = self.trade_amount
+                    required_balance = amount_to_invest * 1.01  # +1% for fees
                     
-                    # STOP checking for buy signals for 5 minutes
-                    import time
-                    time.sleep(300)  # Sleep for 5 minutes to avoid spam
-                    return False
+                    self.logger.info("💎 FIRST TRADE - Initial Investment")
+                    self.logger.info(f"   Investment Amount: ${amount_to_invest:.2f}")
+                    
+                    if available_usdt < required_balance:
+                        self.logger.warning("=" * 70)
+                        self.logger.warning("⚠️  INSUFFICIENT USDT FOR INITIAL INVESTMENT")
+                        self.logger.warning("=" * 70)
+                        self.logger.warning(f"Required: ${required_balance:.2f} (includes 1% for fees)")
+                        self.logger.warning(f"Available: ${available_usdt:.2f}")
+                        self.logger.warning(f"Shortfall: ${required_balance - available_usdt:.2f}")
+                        self.logger.warning("")
+                        self.logger.warning("💡 Solutions:")
+                        self.logger.warning("   1. Add more USDT to your Binance account")
+                        self.logger.warning("   2. Reduce bot trade amount")
+                        self.logger.warning("=" * 70)
+                        
+                        import time
+                        time.sleep(300)  # Sleep for 5 minutes
+                        return False
+                    
+                    # Mark as traded and save initial investment
+                    self.has_traded = True
+                    self.initial_investment = amount_to_invest
+                    
+                else:
+                    # SUBSEQUENT TRADES: Use ALL available USDT from previous sell
+                    # This trades the same money back and forth (sell high, buy low)
+                    amount_to_invest = available_usdt * 0.99  # Leave 1% for fees
+                    
+                    self.logger.info("🔄 RE-INVESTING from previous sell")
+                    self.logger.info(f"   Original Investment: ${self.initial_investment:.2f}")
+                    self.logger.info(f"   Current Balance: ${available_usdt:.2f}")
+                    self.logger.info(f"   Profit/Loss: ${available_usdt - self.initial_investment:.2f} ({((available_usdt / self.initial_investment - 1) * 100):.2f}%)")
+                    self.logger.info(f"   Re-investing: ${amount_to_invest:.2f}")
+                    
+                    if amount_to_invest < 10:  # Minimum $10 to trade
+                        self.logger.warning("⚠️  Balance too low to continue trading (< $10)")
+                        self.logger.warning(f"   Available: ${available_usdt:.2f}")
+                        return False
                 
-                # Calculate quantity
-                raw_quantity = self.trade_amount / current_price
+                # Calculate quantity based on amount to invest
+                raw_quantity = amount_to_invest / current_price
                 
                 # Format quantity to match Binance precision rules
                 quantity = self.format_quantity(self.symbol, raw_quantity)
                 
-                self.logger.info(f"💰 Balance check: ${available_usdt:.2f} USDT available")
                 self.logger.info(f"📊 Placing BUY order:")
                 self.logger.info(f"   Symbol: {self.symbol}")
                 self.logger.info(f"   Quantity: {quantity}")
-                self.logger.info(f"   Est. Cost: ${self.trade_amount:.2f}")
+                self.logger.info(f"   Investing: ${amount_to_invest:.2f}")
                 
                 # Place order
                 order = self.client.place_market_order(
