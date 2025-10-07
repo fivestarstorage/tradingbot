@@ -2042,12 +2042,25 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 return;
             }
             
-            list.innerHTML = trades.map(trade => `
-                <div class="trade-item">
-                    <div class="trade-time">${trade.time}</div>
-                    <div>${trade.info}</div>
-                </div>
-            `).reverse().join('');
+            list.innerHTML = trades.map(trade => {
+                // Try to format trade time if it's a valid date
+                let formattedTime = trade.time;
+                try {
+                    const date = new Date(trade.time);
+                    if (!isNaN(date.getTime())) {
+                        formattedTime = formatDateTime(trade.time);
+                    }
+                } catch (e) {
+                    // If parsing fails, keep original
+                }
+                
+                return `
+                    <div class="trade-item">
+                        <div class="trade-time">${formattedTime}</div>
+                        <div>${trade.info}</div>
+                    </div>
+                `;
+            }).reverse().join('');
         }
         
         // Update symbol help text based on strategy
@@ -2495,7 +2508,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         return `
                             <div style="margin-bottom: 8px; padding: 8px; background: #1a1a2e; border-radius: 4px; border-left: 3px solid ${color};">
                                 <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                                    <span style="color: #888; font-size: 0.9em;">${log.timestamp}</span>
+                                    <span style="color: #888; font-size: 0.9em;">${formatDateTime(log.timestamp)}</span>
                                     <span style="color: ${color}; font-weight: bold;">${icon} Bot ${log.bot_id} | ${log.level}</span>
                                 </div>
                                 <div style="color: ${color};">${log.message}</div>
@@ -2557,7 +2570,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }
             
             list.innerHTML = recommendations.map(rec => {
-                const time = new Date(rec.timestamp).toLocaleTimeString();
+                const time = formatDateTime(rec.timestamp);
                 const signalColor = rec.signal === 'BUY' ? '#4caf50' : '#f44336';
                 const sentimentEmoji = rec.sentiment === 'Positive' ? '🟢' : (rec.sentiment === 'Negative' ? '🔴' : '⚪');
                 
@@ -2586,7 +2599,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }
             
             list.innerHTML = analyses.map(analysis => {
-                const time = new Date(analysis.timestamp).toLocaleTimeString();
+                const time = formatDateTime(analysis.timestamp);
                 const signalColor = analysis.signal === 'BUY' ? '#4caf50' : (analysis.signal === 'SELL' ? '#f44336' : '#888');
                 const sentimentColor = analysis.sentiment === 'Positive' ? '#4caf50' : (analysis.sentiment === 'Negative' ? '#f44336' : '#888');
                 
