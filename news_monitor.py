@@ -199,23 +199,27 @@ class NewsMonitor:
             logger.error(f"Unexpected error with CryptoNews API: {e}")
             return []
     
-    def fetch_crypto_news(self, symbols=['BTC', 'ETH', 'crypto', 'bitcoin', 'ethereum'], hours_back=1):
+    def fetch_crypto_news(self, symbols=['BTC', 'ETH', 'crypto', 'bitcoin', 'ethereum'], hours_back=1, force_fresh=False):
         """
         Fetch recent crypto news (PRIMARY: CryptoNews API, FALLBACK: others)
         
         Args:
             symbols: List of keywords to search for (used for fallback sources)
             hours_back: How many hours of news to fetch
+            force_fresh: If True, bypass cache and fetch fresh data
             
         Returns:
             List of news articles with metadata
         """
-        # CHECK CACHE FIRST
-        if self.cache_time and self.cached_articles:
+        # CHECK CACHE FIRST (unless force_fresh)
+        if not force_fresh and self.cache_time and self.cached_articles:
             time_since_cache = (datetime.now() - self.cache_time).total_seconds()
             if time_since_cache < self.cache_duration:
                 logger.info(f"📦 Using cached articles ({len(self.cached_articles)} articles, {int(self.cache_duration - time_since_cache)}s until refresh)")
                 return self.cached_articles
+        
+        if force_fresh:
+            logger.info("🔄 FORCE FRESH FETCH - Bypassing cache for startup")
         
         # PRIORITY 1: Try CryptoNews API (UNLIMITED, best crypto coverage)
         if self.cryptonews_key:

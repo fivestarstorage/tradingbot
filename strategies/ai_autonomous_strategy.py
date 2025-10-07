@@ -39,6 +39,10 @@ class AIAutonomousStrategy:
         self.news_monitor = NewsMonitor(newsapi_key=newsapi_key)
         self.ai_analyzer = AINewsAnalyzer(api_key=openai_key)
         
+        # Sentiment tracking for dashboard
+        from ai_sentiment_tracker import AISentimentTracker
+        self.sentiment_tracker = AISentimentTracker()
+        
         # Configuration
         self.min_confidence = 80  # Higher threshold for autonomous trading
         self.max_articles_per_cycle = 20  # Analyze MORE news articles
@@ -183,7 +187,7 @@ class AIAutonomousStrategy:
         
         return None
     
-    def generate_signal(self, data=None, symbol='BTCUSDT', current_price=None):
+    def generate_signal(self, data=None, symbol='BTCUSDT', current_price=None, force_fresh_news=False):
         """
         Generate trading signal - AI picks the coin!
         
@@ -195,6 +199,7 @@ class AIAutonomousStrategy:
             data: Not used (AI fetches news)
             symbol: Default symbol (overridden by AI)
             current_price: Current price for position management
+            force_fresh_news: If True, fetch fresh news (bypassing cache) - used on startup
         
         Returns:
             Dict with:
@@ -224,7 +229,8 @@ class AIAutonomousStrategy:
                 
                 articles = self.news_monitor.fetch_crypto_news(
                     symbols=[coin_name, 'crypto', 'cryptocurrency'],
-                    hours_back=1  # Recent news only
+                    hours_back=1,  # Recent news only
+                    force_fresh=force_fresh_news
                 )
                 
                 if articles:
@@ -277,7 +283,8 @@ class AIAutonomousStrategy:
                     'cryptocurrency', 'crypto', 'bitcoin', 'ethereum', 
                     'blockchain', 'defi', 'web3', 'altcoin', 'binance'
                 ],
-                hours_back=2  # Last 2 hours
+                hours_back=2,  # Last 2 hours
+                force_fresh=force_fresh_news
             )
             
             if not articles:
@@ -313,6 +320,13 @@ class AIAutonomousStrategy:
                         valid_symbols.append(sym)
                     else:
                         logger.info(f"  ❌ {sym} not tradeable on Binance, skipping")
+                
+                # TRACK ANALYSIS for dashboard
+                self.sentiment_tracker.add_analysis(
+                    article_title=article['title'],
+                    analysis=analysis,
+                    mentioned_symbols=valid_symbols
+                )
                 
                 if valid_symbols and analysis['signal'] in ['BUY', 'SELL']:
                     for sym in valid_symbols:

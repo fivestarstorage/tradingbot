@@ -393,6 +393,21 @@ def overview():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/sentiment')
+def get_sentiment():
+    """Get AI sentiment analysis data for dashboard"""
+    try:
+        from ai_sentiment_tracker import AISentimentTracker
+        tracker = AISentimentTracker()
+        data = tracker.get_dashboard_data()
+        
+        return jsonify({
+            'success': True,
+            **data
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 @app.route('/api/logs')
 def get_logs():
     """Get all bot logs with filtering"""
@@ -964,6 +979,54 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
         </div>
         
+        <!-- AI Sentiment Analysis Dashboard -->
+        <div class="section">
+            <div class="section-header">
+                <h2>🧠 AI Sentiment Analysis</h2>
+                <button onclick="refreshSentiment()" class="btn btn-sm">🔄 Refresh</button>
+            </div>
+            
+            <!-- Sentiment Summary -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                <div class="summary-card">
+                    <h3>🟢 Bullish</h3>
+                    <div class="value" style="color: #4caf50;" id="sentiment-positive">0%</div>
+                    <div style="color: #888; font-size: 0.9em;" id="sentiment-positive-count">0 articles</div>
+                </div>
+                <div class="summary-card">
+                    <h3>🔴 Bearish</h3>
+                    <div class="value" style="color: #f44336;" id="sentiment-negative">0%</div>
+                    <div style="color: #888; font-size: 0.9em;" id="sentiment-negative-count">0 articles</div>
+                </div>
+                <div class="summary-card">
+                    <h3>⚪ Neutral</h3>
+                    <div class="value" style="color: #888;" id="sentiment-neutral">0%</div>
+                    <div style="color: #888; font-size: 0.9em;" id="sentiment-neutral-count">0 articles</div>
+                </div>
+                <div class="summary-card">
+                    <h3>📰 Total Analyzed</h3>
+                    <div class="value" id="sentiment-total">0</div>
+                    <div style="color: #888; font-size: 0.9em;">articles</div>
+                </div>
+            </div>
+            
+            <!-- Top Recommendations -->
+            <div style="background: #1e1e1e; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                <h3 style="margin-top: 0;">🎯 Top AI Recommendations</h3>
+                <div id="recommendations-list">
+                    <div class="empty-state">No recommendations yet...</div>
+                </div>
+            </div>
+            
+            <!-- Recent Analyses -->
+            <div style="background: #1e1e1e; padding: 15px; border-radius: 8px;">
+                <h3 style="margin-top: 0;">📊 Recent AI Analyses</h3>
+                <div id="analyses-list" style="max-height: 400px; overflow-y: auto;">
+                    <div class="empty-state">No analyses yet...</div>
+                </div>
+            </div>
+        </div>
+        
         <!-- Recent Trades -->
         <div class="section">
             <div class="section-header">
@@ -1472,13 +1535,105 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             refreshLogs();
         }
         
+        // Sentiment Analysis Dashboard
+        function refreshSentiment() {
+            fetch('/api/sentiment')
+                .then(response => response.json())
+                .then(result => {
+                    if (!result.success) {
+                        console.error('Sentiment error:', result.error);
+                        return;
+                    }
+                    
+                    // Update sentiment summary
+                    const summary = result.sentiment_summary;
+                    document.getElementById('sentiment-positive').textContent = summary.Positive_pct ? summary.Positive_pct + '%' : '0%';
+                    document.getElementById('sentiment-positive-count').textContent = summary.Positive + ' articles';
+                    document.getElementById('sentiment-negative').textContent = summary.Negative_pct ? summary.Negative_pct + '%' : '0%';
+                    document.getElementById('sentiment-negative-count').textContent = summary.Negative + ' articles';
+                    document.getElementById('sentiment-neutral').textContent = summary.Neutral_pct ? summary.Neutral_pct + '%' : '0%';
+                    document.getElementById('sentiment-neutral-count').textContent = summary.Neutral + ' articles';
+                    document.getElementById('sentiment-total').textContent = summary.total;
+                    
+                    // Render recommendations
+                    renderRecommendations(result.recommendations || []);
+                    
+                    // Render recent analyses
+                    renderAnalyses(result.recent_analyses || []);
+                })
+                .catch(error => {
+                    console.error('Error fetching sentiment:', error);
+                });
+        }
+        
+        function renderRecommendations(recommendations) {
+            const list = document.getElementById('recommendations-list');
+            
+            if (recommendations.length === 0) {
+                list.innerHTML = '<div class="empty-state">No recommendations yet...</div>';
+                return;
+            }
+            
+            list.innerHTML = recommendations.map(rec => {
+                const time = new Date(rec.timestamp).toLocaleTimeString();
+                const signalColor = rec.signal === 'BUY' ? '#4caf50' : '#f44336';
+                const sentimentEmoji = rec.sentiment === 'Positive' ? '🟢' : (rec.sentiment === 'Negative' ? '🔴' : '⚪');
+                
+                return `
+                    <div style="background: #2a2a2a; padding: 12px; border-radius: 6px; margin-bottom: 10px; border-left: 3px solid ${signalColor};">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <div style="font-weight: bold; color: ${signalColor};">${rec.signal} ${rec.symbols.join(', ')}</div>
+                            <div style="color: #888; font-size: 0.85em;">${time}</div>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                            <span>${sentimentEmoji} ${rec.sentiment}</span>
+                            <span style="color: #ffa726;">⭐ ${rec.confidence}% confidence</span>
+                        </div>
+                        <div style="color: #ccc; font-size: 0.9em; font-style: italic;">${rec.reasoning}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        function renderAnalyses(analyses) {
+            const list = document.getElementById('analyses-list');
+            
+            if (analyses.length === 0) {
+                list.innerHTML = '<div class="empty-state">No analyses yet...</div>';
+                return;
+            }
+            
+            list.innerHTML = analyses.map(analysis => {
+                const time = new Date(analysis.timestamp).toLocaleTimeString();
+                const signalColor = analysis.signal === 'BUY' ? '#4caf50' : (analysis.signal === 'SELL' ? '#f44336' : '#888');
+                const sentimentColor = analysis.sentiment === 'Positive' ? '#4caf50' : (analysis.sentiment === 'Negative' ? '#f44336' : '#888');
+                
+                return `
+                    <div style="background: #2a2a2a; padding: 10px; border-radius: 6px; margin-bottom: 8px; font-size: 0.9em;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <div style="font-weight: 500; color: #fff;">${analysis.article.substring(0, 60)}${analysis.article.length > 60 ? '...' : ''}</div>
+                            <div style="color: #888; font-size: 0.85em;">${time}</div>
+                        </div>
+                        <div style="display: flex; gap: 15px; color: #ccc;">
+                            <span style="color: ${signalColor};">📊 ${analysis.signal}</span>
+                            <span style="color: ${sentimentColor};">${analysis.sentiment}</span>
+                            <span style="color: #ffa726;">${analysis.confidence}%</span>
+                            ${analysis.symbols.length > 0 ? '<span>💹 ' + analysis.symbols.slice(0, 3).join(', ') + '</span>' : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
         // Initial update
         updateDashboard();
         refreshLogs();
+        refreshSentiment();
         
         // Auto-refresh every 5 seconds
         setInterval(updateDashboard, 5000);
         setInterval(refreshLogs, 10000); // Refresh logs every 10 seconds
+        setInterval(refreshSentiment, 30000); // Refresh sentiment every 30 seconds
     </script>
 </body>
 </html>"""

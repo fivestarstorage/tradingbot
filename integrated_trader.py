@@ -120,6 +120,13 @@ class BotRunner:
                     if hasattr(self.strategy, 'set_position'):
                         self.strategy.set_position(self.symbol, current_price)
                     
+                    # Track trade decision for dashboard
+                    if hasattr(self.strategy, 'sentiment_tracker'):
+                        reasoning = signal_data.get('reasoning', 'Trade executed') if signal_data else 'Trade executed'
+                        self.strategy.sentiment_tracker.add_trade_decision(
+                            'BUY', self.symbol, current_price, reasoning
+                        )
+                    
                     self.logger.info(f"🟢 OPENED POSITION: {self.bot_name}")
                     self.logger.info(f"   Symbol: {self.symbol}")
                     self.logger.info(f"   Entry: ${current_price:.2f}")
@@ -176,6 +183,13 @@ class BotRunner:
                         if hasattr(self.strategy, 'clear_position'):
                             self.strategy.clear_position()
                         
+                        # Update trade result for dashboard
+                        if hasattr(self.strategy, 'sentiment_tracker'):
+                            result = 'profit' if profit > 0 else 'loss'
+                            self.strategy.sentiment_tracker.update_trade_result(
+                                self.symbol, result, profit_pct
+                            )
+                        
                         self.position = None
                         self.entry_price = None
                         self.trades_count += 1
@@ -197,6 +211,25 @@ class BotRunner:
         self.logger.info(f"Trade Amount: ${self.trade_amount}")
         self.logger.info(f"Mode: {'TESTNET' if Config.USE_TESTNET else 'MAINNET'}")
         self.logger.info("=" * 70)
+        
+        # STARTUP: Force fresh news fetch on bot start (uses 1/3 daily calls)
+        if hasattr(self.strategy, 'generate_signal'):
+            self.logger.info("")
+            self.logger.info("🚀 STARTUP: Fetching fresh news from CryptoNews API...")
+            self.logger.info("⚠️  This will use 1 of 3 daily API calls")
+            try:
+                # Call generate_signal with force_fresh_news=True
+                data = self.get_data(limit=100)
+                if data:
+                    startup_signal = self.strategy.generate_signal(
+                        data, 
+                        symbol=self.symbol, 
+                        force_fresh_news=True
+                    )
+                    self.logger.info(f"✅ Startup analysis complete: {startup_signal.get('signal', 'HOLD')}")
+            except Exception as e:
+                self.logger.error(f"Startup fetch error: {e}")
+            self.logger.info("")
         
         while True:
             try:
