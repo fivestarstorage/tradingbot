@@ -83,7 +83,7 @@ Only recommend BUY/SELL if you're >70% confident. Otherwise say HOLD."""
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",  # Cheaper model, still very good
                 messages=[
-                    {"role": "system", "content": "You are an expert cryptocurrency trader and news analyst. You analyze news and provide actionable trading signals."},
+                    {"role": "system", "content": "You are an expert cryptocurrency trader and news analyst. You analyze ALL types of news (tech, business, finance) and determine if they impact cryptocurrency markets. You provide actionable trading signals only for crypto-relevant news. If news is not crypto-related, return HOLD with low confidence."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.3,  # Lower temperature for more consistent analysis

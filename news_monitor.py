@@ -81,14 +81,83 @@ class NewsMonitor:
                     'timestamp': datetime.fromisoformat(article['publishedAt'].replace('Z', '+00:00'))
                 })
             
-            logger.info(f"Fetched {len(articles)} new articles")
+            logger.info(f"Fetched {len(articles)} crypto-specific articles")
+            
+            # If we got very few articles, expand to general tech/business news
+            if len(articles) < 5:
+                logger.info(f"Only {len(articles)} crypto articles, expanding to tech/business news...")
+                tech_articles = self.fetch_tech_news(hours_back)
+                articles.extend(tech_articles)
+                logger.info(f"Total: {len(articles)} articles (AI will filter for crypto relevance)")
+            
             return articles
         
         except requests.exceptions.RequestException as e:
             logger.error(f"Error fetching news: {e}")
-            return []
+            # Fallback to tech news
+            return self.fetch_tech_news(hours_back)
         except Exception as e:
             logger.error(f"Unexpected error: {e}")
+            return []
+    
+    def fetch_tech_news(self, hours_back=2):
+        """
+        Fetch general tech and business news
+        AI will filter for crypto/blockchain relevance
+        """
+        if not self.newsapi_key:
+            return []
+        
+        from_time = (datetime.now() - timedelta(hours=hours_back)).isoformat()
+        
+        try:
+            # Get top tech headlines
+            params = {
+                'category': 'technology',
+                'from': from_time,
+                'sortBy': 'publishedAt',
+                'language': 'en',
+                'apiKey': self.newsapi_key,
+                'pageSize': 50  # Get more articles
+            }
+            
+            response = requests.get('https://newsapi.org/v2/top-headlines', params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data.get('status') != 'ok':
+                logger.error(f"NewsAPI error: {data.get('message')}")
+                return []
+            
+            articles = []
+            for article in data.get('articles', []):
+                # Skip if no title or description
+                if not article.get('title') or not article.get('description'):
+                    continue
+                
+                article_id = f"{article['source']['name']}_{article['publishedAt']}"
+                
+                if article_id in self.seen_articles:
+                    continue
+                
+                self.seen_articles.add(article_id)
+                
+                articles.append({
+                    'id': article_id,
+                    'title': article['title'],
+                    'description': article['description'] or '',
+                    'content': article['content'] or '',
+                    'source': article['source']['name'],
+                    'url': article['url'],
+                    'published_at': article['publishedAt'],
+                    'timestamp': datetime.fromisoformat(article['publishedAt'].replace('Z', '+00:00'))
+                })
+            
+            logger.info(f"Fetched {len(articles)} tech news articles")
+            return articles
+        
+        except Exception as e:
+            logger.error(f"Error fetching tech news: {e}")
             return []
     
     def fetch_coingecko_trending(self):
