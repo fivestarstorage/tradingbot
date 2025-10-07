@@ -41,7 +41,7 @@ class AIAutonomousStrategy:
         
         # Configuration
         self.min_confidence = 80  # Higher threshold for autonomous trading
-        self.max_articles_per_cycle = 10  # Check more articles
+        self.max_articles_per_cycle = 20  # Analyze MORE news articles
         
         # Supported trading pairs on Binance
         self.supported_symbols = [
@@ -49,6 +49,17 @@ class AIAutonomousStrategy:
             'ADAUSDT', 'DOGEUSDT', 'AVAXUSDT', 'DOTUSDT', 'MATICUSDT',
             'LINKUSDT', 'UNIUSDT', 'LTCUSDT', 'ATOMUSDT', 'ETCUSDT'
         ]
+        
+        # Position Management
+        self.current_position = None  # Which coin we're holding
+        self.entry_price = None
+        self.entry_time = None
+        self.position_confidence = 0
+        
+        # Risk Management
+        self.stop_loss_pct = 0.03  # 3% stop loss
+        self.take_profit_pct = 0.05  # 5% take profit
+        self.max_hold_hours = 24  # Max time to hold a position
         
         # Cache analyses
         self.recent_analyses = []
@@ -58,14 +69,103 @@ class AIAutonomousStrategy:
         self.last_decision = None
     
     def analyze(self, klines):
-        """Wrapper for compatibility with live trader - AI doesn't need klines"""
-        return self.generate_signal(data=None, symbol='BTCUSDT')
+        """Wrapper for compatibility with live trader"""
+        # Extract current price if we have a position
+        current_price = None
+        if klines and len(klines) > 0:
+            current_price = float(klines[-1][4])  # Close price
+        
+        return self.generate_signal(data=None, symbol='BTCUSDT', current_price=current_price)
     
-    def generate_signal(self, data=None, symbol='BTCUSDT'):
+    def set_position(self, symbol, entry_price):
+        """Called when a position is opened"""
+        from datetime import datetime
+        self.current_position = symbol
+        self.entry_price = entry_price
+        self.entry_time = datetime.now()
+        logger.info(f"📍 Position set: {symbol} @ ${entry_price:.2f}")
+    
+    def clear_position(self):
+        """Called when a position is closed"""
+        logger.info(f"✅ Position cleared: {self.current_position}")
+        self.current_position = None
+        self.entry_price = None
+        self.entry_time = None
+        self.position_confidence = 0
+    
+    def check_technical_stops(self, current_price):
+        """Check if stop loss or take profit is hit"""
+        if not self.current_position or not self.entry_price:
+            return None
+        
+        # Calculate P&L
+        pnl_pct = (current_price - self.entry_price) / self.entry_price
+        
+        # Stop loss hit
+        if pnl_pct <= -self.stop_loss_pct:
+            logger.warning(f"🛑 STOP LOSS HIT: {pnl_pct*100:.2f}%")
+            return {
+                'signal': 'SELL',
+                'confidence': 95,
+                'reasoning': f'Stop loss triggered at {pnl_pct*100:.2f}% loss',
+                'recommended_symbol': self.current_position,
+                'risk': {
+                    'stop_loss': self.entry_price * (1 - self.stop_loss_pct),
+                    'take_profit': self.entry_price * (1 + self.take_profit_pct),
+                    'position_multiplier': 1.0,
+                    'atr_value': 0
+                }
+            }
+        
+        # Take profit hit
+        if pnl_pct >= self.take_profit_pct:
+            logger.info(f"🎯 TAKE PROFIT HIT: {pnl_pct*100:.2f}%")
+            return {
+                'signal': 'SELL',
+                'confidence': 95,
+                'reasoning': f'Take profit triggered at {pnl_pct*100:.2f}% gain',
+                'recommended_symbol': self.current_position,
+                'risk': {
+                    'stop_loss': self.entry_price * (1 - self.stop_loss_pct),
+                    'take_profit': self.entry_price * (1 + self.take_profit_pct),
+                    'position_multiplier': 1.0,
+                    'atr_value': 0
+                }
+            }
+        
+        # Check max hold time
+        if self.entry_time:
+            from datetime import datetime, timedelta
+            hold_duration = datetime.now() - self.entry_time
+            if hold_duration > timedelta(hours=self.max_hold_hours):
+                logger.info(f"⏰ MAX HOLD TIME REACHED: {hold_duration.total_seconds()/3600:.1f}h")
+                return {
+                    'signal': 'SELL',
+                    'confidence': 80,
+                    'reasoning': f'Maximum hold time ({self.max_hold_hours}h) reached',
+                    'recommended_symbol': self.current_position,
+                    'risk': {
+                        'stop_loss': self.entry_price * (1 - self.stop_loss_pct),
+                        'take_profit': self.entry_price * (1 + self.take_profit_pct),
+                        'position_multiplier': 1.0,
+                        'atr_value': 0
+                    }
+                }
+        
+        return None
+    
+    def generate_signal(self, data=None, symbol='BTCUSDT', current_price=None):
         """
         Generate trading signal - AI picks the coin!
         
-        Note: 'symbol' parameter is ignored - AI decides which coin
+        ENHANCED with Position Management:
+        - If we have a position: Monitor that coin + check stops
+        - If no position: Scan ALL news for best opportunity
+        
+        Args:
+            data: Not used (AI fetches news)
+            symbol: Default symbol (overridden by AI)
+            current_price: Current price for position management
         
         Returns:
             Dict with:
@@ -74,10 +174,72 @@ class AIAutonomousStrategy:
                 'confidence': 0-100,
                 'reasoning': str,
                 'recommended_symbol': str (which coin to trade),
-                'indicators': dict
+                'indicators': dict,
+                'risk': dict (stop loss, take profit)
             }
         """
         try:
+            # === POSITION MANAGEMENT MODE ===
+            if self.current_position:
+                logger.info(f"📊 Managing position: {self.current_position}")
+                
+                # Check technical stops first
+                if current_price:
+                    stop_signal = self.check_technical_stops(current_price)
+                    if stop_signal:
+                        return stop_signal
+                
+                # Monitor news for the held coin
+                logger.info(f"📰 Checking news for {self.current_position}...")
+                coin_name = self.current_position.replace('USDT', '').lower()
+                
+                articles = self.news_monitor.fetch_crypto_news(
+                    symbols=[coin_name, 'crypto', 'cryptocurrency'],
+                    hours_back=1  # Recent news only
+                )
+                
+                if articles:
+                    for article in articles[:5]:  # Check recent articles
+                        analysis = self.ai_analyzer.analyze_news(article)
+                        
+                        # If negative news with high confidence, sell
+                        if analysis['signal'] == 'SELL' and analysis['confidence'] >= 75:
+                            logger.warning(f"📉 Negative news detected for {self.current_position}!")
+                            return {
+                                'signal': 'SELL',
+                                'confidence': analysis['confidence'],
+                                'reasoning': f"Negative news: {analysis['reasoning']}",
+                                'recommended_symbol': self.current_position,
+                                'indicators': {
+                                    'news_headline': article['title'],
+                                    'sentiment': analysis['sentiment'],
+                                    'impact': analysis['impact']
+                                },
+                                'risk': {
+                                    'stop_loss': self.entry_price * (1 - self.stop_loss_pct),
+                                    'take_profit': self.entry_price * (1 + self.take_profit_pct),
+                                    'position_multiplier': 1.0,
+                                    'atr_value': 0
+                                }
+                            }
+                
+                # Position OK, no action needed
+                pnl_pct = ((current_price - self.entry_price) / self.entry_price * 100) if current_price else 0
+                return {
+                    'signal': 'HOLD',
+                    'confidence': 70,
+                    'reasoning': f'Holding {self.current_position} (P&L: {pnl_pct:+.2f}%)',
+                    'recommended_symbol': self.current_position,
+                    'indicators': {'position': True, 'pnl_pct': pnl_pct},
+                    'risk': {
+                        'stop_loss': self.entry_price * (1 - self.stop_loss_pct),
+                        'take_profit': self.entry_price * (1 + self.take_profit_pct),
+                        'position_multiplier': 1.0,
+                        'atr_value': 0
+                    }
+                }
+            
+            # === OPPORTUNITY SCANNING MODE ===
             logger.info("🤖 AI scanning all crypto news for opportunities...")
             
             # Fetch broad crypto news

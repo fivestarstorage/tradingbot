@@ -92,7 +92,7 @@ class BotRunner:
         klines = self.client.get_klines(self.symbol, interval='5m', limit=limit)
         return klines if klines else []
     
-    def execute_trade(self, signal, current_price):
+    def execute_trade(self, signal, current_price, signal_data=None):
         """Execute buy/sell orders"""
         try:
             if signal == 'BUY' and not self.position:
@@ -100,10 +100,9 @@ class BotRunner:
                 quantity = self.trade_amount / current_price
                 
                 # Place order
-                order = self.client.place_order(
+                order = self.client.place_market_order(
                     symbol=self.symbol,
                     side='BUY',
-                    order_type='MARKET',
                     quantity=quantity
                 )
                 
@@ -112,6 +111,10 @@ class BotRunner:
                     self.entry_price = current_price
                     self.stop_loss = current_price * 0.98  # 2% stop loss
                     self.take_profit = current_price * 1.03  # 3% take profit
+                    
+                    # Notify strategy about position (for AI strategies)
+                    if hasattr(self.strategy, 'set_position'):
+                        self.strategy.set_position(self.symbol, current_price)
                     
                     self.logger.info(f"🟢 OPENED POSITION: {self.bot_name}")
                     self.logger.info(f"   Symbol: {self.symbol}")
@@ -138,10 +141,9 @@ class BotRunner:
                     quantity = balance['free']
                     
                     # Place order
-                    order = self.client.place_order(
+                    order = self.client.place_market_order(
                         symbol=self.symbol,
                         side='SELL',
-                        order_type='MARKET',
                         quantity=quantity
                     )
                     
@@ -165,6 +167,10 @@ class BotRunner:
                             'profit_percent': profit_pct,
                             'bot_name': self.bot_name
                         })
+                        
+                        # Notify strategy about position close (for AI strategies)
+                        if hasattr(self.strategy, 'clear_position'):
+                            self.strategy.clear_position()
                         
                         self.position = None
                         self.entry_price = None
@@ -205,6 +211,16 @@ class BotRunner:
                 signal_data = self.strategy.analyze(data)
                 signal = signal_data['signal']
                 
+                # For AI strategies, check if symbol should change
+                if 'recommended_symbol' in signal_data and signal_data['recommended_symbol'] != self.symbol:
+                    new_symbol = signal_data['recommended_symbol']
+                    self.logger.info(f"🔄 AI switched to: {new_symbol}")
+                    self.symbol = new_symbol
+                    # Re-fetch data for new symbol
+                    data = self.get_data(limit=100)
+                    if data:
+                        current_price = float(data[-1][4])
+                
                 # Log status
                 if self.position:
                     profit = (current_price - self.entry_price) / self.entry_price * 100
@@ -212,18 +228,18 @@ class BotRunner:
                 else:
                     self.logger.info(f"⏳ Waiting for signal... (Current: {signal}, Price: ${current_price:.2f})")
                 
-                # Check stop loss / take profit
-                if self.position:
+                # Check stop loss / take profit (skip if strategy manages them)
+                if self.position and not hasattr(self.strategy, 'current_position'):
                     if current_price <= self.stop_loss:
                         self.logger.warning("⚠️ Stop loss triggered!")
-                        self.execute_trade('SELL', current_price)
+                        self.execute_trade('SELL', current_price, signal_data)
                     elif current_price >= self.take_profit:
                         self.logger.info("🎯 Take profit reached!")
-                        self.execute_trade('SELL', current_price)
+                        self.execute_trade('SELL', current_price, signal_data)
                 
                 # Execute signals
                 if signal in ['BUY', 'SELL']:
-                    self.execute_trade(signal, current_price)
+                    self.execute_trade(signal, current_price, signal_data)
                 
                 # Wait before next check
                 time.sleep(60)
