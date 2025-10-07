@@ -1682,6 +1682,65 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         let currentData = {};
         let dashboardStartTime = Date.now();
         
+        // Format date to local timezone in dd/mm/yyyy hh:mm am/pm format
+        function formatDateTime(dateString) {
+            if (!dateString) return 'N/A';
+            
+            const date = new Date(dateString);
+            
+            // Check if valid date
+            if (isNaN(date.getTime())) return dateString;
+            
+            // Get date components
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+            
+            // Get time components
+            let hours = date.getHours();
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const ampm = hours >= 12 ? 'pm' : 'am';
+            
+            // Convert to 12-hour format
+            hours = hours % 12;
+            hours = hours ? hours : 12; // 0 should be 12
+            hours = String(hours).padStart(2, '0');
+            
+            return `${day}/${month}/${year} ${hours}:${minutes} ${ampm}`;
+        }
+        
+        // Format time only (for shorter display)
+        function formatTime(dateString) {
+            if (!dateString) return 'N/A';
+            
+            const date = new Date(dateString);
+            if (isNaN(date.getTime())) return dateString;
+            
+            let hours = date.getHours();
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const ampm = hours >= 12 ? 'pm' : 'am';
+            
+            hours = hours % 12;
+            hours = hours ? hours : 12;
+            hours = String(hours).padStart(2, '0');
+            
+            return `${hours}:${minutes} ${ampm}`;
+        }
+        
+        // Format date only
+        function formatDate(dateString) {
+            if (!dateString) return 'N/A';
+            
+            const date = new Date(dateString);
+            if (isNaN(date.getTime())) return dateString;
+            
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+            
+            return `${day}/${month}/${year}`;
+        }
+        
         // Tab switching
         function switchTab(tabName) {
             // Hide all tabs
