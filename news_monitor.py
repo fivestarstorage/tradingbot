@@ -26,43 +26,49 @@ class NewsMonitor:
         # Track seen articles to avoid duplicates
         self.seen_articles = set()
         
-        # CACHING to reduce API calls
+        # CACHING to reduce API calls (CRITICAL for 3 calls/day limit!)
         self.cached_articles = []
         self.cache_time = None
-        self.cache_duration = 600  # Cache for 10 minutes (600 seconds)
+        self.cache_duration = 28800  # Cache for 8 HOURS (28800 seconds) for 3 calls/day
         
         # Rate limiting
         self.last_api_call = None
         self.min_call_interval = 60  # Minimum 60 seconds between API calls
         
-        # DAILY LIMIT TRACKING (only for NewsAPI fallback)
-        self.daily_limit = 100
-        self.calls_today = 0
+        # DAILY LIMIT TRACKING
+        self.newsapi_daily_limit = 100
+        self.newsapi_calls_today = 0
+        
+        # CryptoNews API STRICT LIMIT: 3 calls/day!
+        self.cryptonews_daily_limit = 3
+        self.cryptonews_calls_today = 0
         self.calls_reset_date = None
+        
         self._load_daily_stats()
     
     def _load_daily_stats(self):
         """Load daily API call stats from file"""
         try:
-            import json
             if os.path.exists('newsapi_stats.json'):
                 with open('newsapi_stats.json', 'r') as f:
                     stats = json.load(f)
-                    self.calls_today = stats.get('calls_today', 0)
+                    self.newsapi_calls_today = stats.get('newsapi_calls_today', 0)
+                    self.cryptonews_calls_today = stats.get('cryptonews_calls_today', 0)
                     reset_date_str = stats.get('reset_date')
                     if reset_date_str:
                         self.calls_reset_date = datetime.fromisoformat(reset_date_str).date()
         except Exception as e:
             logger.error(f"Error loading stats: {e}")
-            self.calls_today = 0
+            self.newsapi_calls_today = 0
+            self.cryptonews_calls_today = 0
             self.calls_reset_date = None
     
     def _save_daily_stats(self):
         """Save daily API call stats to file"""
         try:
-            import json
             stats = {
-                'calls_today': self.calls_today,
+                'newsapi_calls_today': self.newsapi_calls_today,
+                'cryptonews_calls_today': self.cryptonews_calls_today,
                 'reset_date': datetime.now().date().isoformat()
             }
             with open('newsapi_stats.json', 'w') as f:
@@ -70,39 +76,68 @@ class NewsMonitor:
         except Exception as e:
             logger.error(f"Error saving stats: {e}")
     
-    def _check_daily_limit(self):
-        """Check and reset daily call counter"""
+    def _check_cryptonews_limit(self):
+        """Check CryptoNews API daily limit (3 calls/day!)"""
         today = datetime.now().date()
         
         # Reset counter if it's a new day
         if self.calls_reset_date is None or today > self.calls_reset_date:
-            self.calls_today = 0
+            self.cryptonews_calls_today = 0
+            self.newsapi_calls_today = 0
             self.calls_reset_date = today
             self._save_daily_stats()
-            logger.info(f"📅 New day! Reset API call counter (Limit: {self.daily_limit}/day)")
+            logger.info(f"📅 New day! Reset API counters")
         
-        # Check if we've hit the limit
-        if self.calls_today >= self.daily_limit:
-            logger.warning(f"⚠️ Daily limit reached! ({self.calls_today}/{self.daily_limit} calls used)")
-            logger.info(f"📰 Using FREE CoinDesk RSS feed instead...")
+        # Check CryptoNews limit
+        if self.cryptonews_calls_today >= self.cryptonews_daily_limit:
+            logger.warning(f"⚠️ CryptoNews daily limit reached! ({self.cryptonews_calls_today}/{self.cryptonews_daily_limit} calls)")
             return False
         
         return True
     
-    def _increment_call_counter(self):
-        """Increment the daily call counter"""
-        self.calls_today += 1
+    def _increment_cryptonews_counter(self):
+        """Increment CryptoNews call counter"""
+        self.cryptonews_calls_today += 1
         self._save_daily_stats()
-        remaining = self.daily_limit - self.calls_today
-        logger.info(f"📊 API calls today: {self.calls_today}/{self.daily_limit} (⏳ {remaining} remaining)")
+        remaining = self.cryptonews_daily_limit - self.cryptonews_calls_today
+        logger.info(f"📊 CryptoNews calls today: {self.cryptonews_calls_today}/{self.cryptonews_daily_limit} (⏳ {remaining} remaining)")
+        logger.warning(f"⚠️ CACHING for 8 hours to preserve remaining calls!")
+    
+    def _check_newsapi_limit(self):
+        """Check NewsAPI daily limit"""
+        today = datetime.now().date()
+        
+        if self.calls_reset_date is None or today > self.calls_reset_date:
+            self.cryptonews_calls_today = 0
+            self.newsapi_calls_today = 0
+            self.calls_reset_date = today
+            self._save_daily_stats()
+        
+        if self.newsapi_calls_today >= self.newsapi_daily_limit:
+            logger.warning(f"⚠️ NewsAPI limit reached! ({self.newsapi_calls_today}/{self.newsapi_daily_limit})")
+            return False
+        
+        return True
+    
+    def _increment_newsapi_counter(self):
+        """Increment NewsAPI call counter"""
+        self.newsapi_calls_today += 1
+        self._save_daily_stats()
+        remaining = self.newsapi_daily_limit - self.newsapi_calls_today
+        logger.info(f"📊 NewsAPI calls today: {self.newsapi_calls_today}/{self.newsapi_daily_limit} (⏳ {remaining} remaining)")
     
     def fetch_cryptonews_api(self, items=50):
         """
         Fetch crypto news from CryptoNews API (PRIMARY SOURCE)
-        NO rate limits! Much better crypto coverage!
+        CRITICAL: Only 3 calls per day! Must cache aggressively!
         """
         if not self.cryptonews_key:
             logger.warning("No CryptoNews API key provided, falling back to other sources")
+            return []
+        
+        # CHECK DAILY LIMIT FIRST
+        if not self._check_cryptonews_limit():
+            logger.error(f"❌ CryptoNews API limit exhausted! Using cache or fallback sources")
             return []
         
         try:
@@ -154,6 +189,7 @@ class NewsMonitor:
                 })
             
             logger.info(f"📰 Fetched {len(articles)} articles from CryptoNews API")
+            self._increment_cryptonews_counter()
             return articles
         
         except requests.exceptions.RequestException as e:
@@ -203,7 +239,7 @@ class NewsMonitor:
             return []
         
         # CHECK DAILY LIMIT
-        if not self._check_daily_limit():
+        if not self._check_newsapi_limit():
             logger.warning("All news sources exhausted or rate limited")
             return []
         
@@ -266,7 +302,7 @@ class NewsMonitor:
             
             # Update rate limiting tracker and increment counter
             self.last_api_call = datetime.now()
-            self._increment_call_counter()
+            self._increment_newsapi_counter()
             
             # If we got very few articles, expand to general tech/business news
             if len(articles) < 5:
@@ -313,7 +349,7 @@ class NewsMonitor:
             return []
         
         # CHECK DAILY LIMIT
-        if not self._check_daily_limit():
+        if not self._check_newsapi_limit():
             logger.info(f"⏳ Daily limit reached, skipping tech news fetch")
             return []
         
@@ -370,7 +406,7 @@ class NewsMonitor:
                 })
             
             logger.info(f"Fetched {len(articles)} tech news articles")
-            self._increment_call_counter()
+            self._increment_newsapi_counter()
             return articles
         
         except Exception as e:
