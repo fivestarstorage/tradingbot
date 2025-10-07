@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard Test</title>
+</head>
+<body>
+    <h1>Dashboard Test Page</h1>
+    <div id="result">Testing...</div>
+    
+    <script>
+        console.log('JavaScript is running!');
+        
+        // Test API call
+        fetch('http://134.199.159.103:5000/api/overview')
+            .then(response => {
+                console.log('Response received:', response);
+                return response.json();
+            })
+            .then(data => {
+                console.log('Data:', data);
+                document.getElementById('result').innerHTML = 
+                    '<h2>✅ API Working!</h2>' +
+                    '<p>Balance: $' + data.account.total.toFixed(2) + '</p>' +
+                    '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('result').innerHTML = 
+                    '<h2>❌ Error</h2><p>' + error + '</p>';
+            });
+    </script>
+</body>
+</html>
