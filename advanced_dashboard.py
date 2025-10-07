@@ -488,6 +488,97 @@ def get_sentiment():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/git/status')
+def get_git_status():
+    """Get git repository status"""
+    try:
+        import subprocess
+        import sys
+        
+        # Get current branch
+        branch = subprocess.check_output(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], cwd='.').decode('utf-8').strip()
+        
+        # Get latest commit info
+        commit_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'], cwd='.').decode('utf-8').strip()
+        commit_message = subprocess.check_output(['git', 'log', '-1', '--pretty=%B'], cwd='.').decode('utf-8').strip()
+        commit_author = subprocess.check_output(['git', 'log', '-1', '--pretty=%an'], cwd='.').decode('utf-8').strip()
+        commit_date = subprocess.check_output(['git', 'log', '-1', '--pretty=%ar'], cwd='.').decode('utf-8').strip()
+        
+        # Get uncommitted changes
+        status_output = subprocess.check_output(['git', 'status', '--porcelain'], cwd='.').decode('utf-8').strip()
+        has_changes = len(status_output) > 0
+        changes_count = len(status_output.split('\n')) if status_output else 0
+        
+        # Fetch remote info
+        try:
+            subprocess.check_output(['git', 'fetch'], cwd='.', stderr=subprocess.DEVNULL)
+        except:
+            pass
+        
+        # Compare with remote
+        try:
+            local = subprocess.check_output(['git', 'rev-parse', '@'], cwd='.').decode('utf-8').strip()
+            remote = subprocess.check_output(['git', 'rev-parse', '@{u}'], cwd='.').decode('utf-8').strip()
+            
+            if local == remote:
+                remote_status = 'up-to-date'
+                behind = 0
+                ahead = 0
+            else:
+                # Count commits behind/ahead
+                behind_output = subprocess.check_output(['git', 'rev-list', '--count', 'HEAD..@{u}'], cwd='.').decode('utf-8').strip()
+                ahead_output = subprocess.check_output(['git', 'rev-list', '--count', '@{u}..HEAD'], cwd='.').decode('utf-8').strip()
+                behind = int(behind_output) if behind_output else 0
+                ahead = int(ahead_output) if ahead_output else 0
+                
+                if behind > 0 and ahead > 0:
+                    remote_status = 'diverged'
+                elif behind > 0:
+                    remote_status = 'behind'
+                elif ahead > 0:
+                    remote_status = 'ahead'
+                else:
+                    remote_status = 'up-to-date'
+        except:
+            remote_status = 'unknown'
+            behind = 0
+            ahead = 0
+        
+        # Get Python version
+        python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        
+        # Get working directory
+        working_dir = os.getcwd()
+        
+        return jsonify({
+            'success': True,
+            'branch': branch,
+            'commit': {
+                'hash': commit_hash,
+                'message': commit_message,
+                'author': commit_author,
+                'date': commit_date
+            },
+            'status': {
+                'clean': not has_changes,
+                'changes_count': changes_count
+            },
+            'remote': {
+                'status': remote_status,
+                'behind': behind,
+                'ahead': ahead
+            },
+            'python_version': python_version,
+            'working_dir': working_dir
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        })
+
 @app.route('/api/coin/<symbol>')
 def get_coin_details(symbol):
     """Get detailed information about a specific coin"""
@@ -1182,6 +1273,44 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             background: #667eea;
             border-radius: 4px;
         }
+        
+        .tabs {
+            display: flex;
+            gap: 5px;
+            background: #16161f;
+            padding: 10px 20px 0 20px;
+            border-bottom: 2px solid #2a2a3e;
+        }
+        
+        .tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            border-radius: 8px 8px 0 0;
+            background: #1e1e2e;
+            color: #888;
+            border: none;
+            font-size: 1em;
+            transition: all 0.2s;
+        }
+        
+        .tab:hover {
+            background: #252535;
+            color: #fff;
+        }
+        
+        .tab.active {
+            background: #0d0d17;
+            color: #667eea;
+            font-weight: bold;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -1190,7 +1319,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div class="mode-badge" id="mode">Loading...</div>
     </div>
     
+    <!-- Tab Navigation -->
+    <div class="tabs">
+        <button class="tab active" onclick="switchTab('overview')">📊 Overview</button>
+        <button class="tab" onclick="switchTab('logs')">📋 Logs</button>
+        <button class="tab" onclick="switchTab('system')">⚙️ System</button>
+    </div>
+    
     <div class="container">
+        <!-- Overview Tab Content -->
+        <div id="overview-tab" class="tab-content active">
         <!-- Account Summary -->
         <div class="account-summary">
             <div class="summary-card">
@@ -1298,6 +1436,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
         </div>
         
+        </div><!-- End Overview Tab -->
+        
+        <!-- Logs Tab Content -->
+        <div id="logs-tab" class="tab-content">
         <!-- Bot Logs Viewer -->
         <div class="section">
             <div class="section-header">
@@ -1331,6 +1473,83 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <div style="color: #888; text-align: center;">Loading logs...</div>
             </div>
         </div>
+        </div><!-- End Logs Tab -->
+        
+        <!-- System Tab Content -->
+        <div id="system-tab" class="tab-content">
+            <!-- Git Status Section -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>📦 Git Repository Status</h2>
+                    <button class="btn btn-sm" onclick="refreshGitStatus()">🔄 Refresh</button>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+                    <div class="summary-card">
+                        <h3>🌿 Current Branch</h3>
+                        <div class="value" style="font-size: 1.3em;" id="git-branch">Loading...</div>
+                    </div>
+                    
+                    <div class="summary-card">
+                        <h3>📊 Status</h3>
+                        <div class="value" style="font-size: 1.3em;" id="git-status">Loading...</div>
+                    </div>
+                    
+                    <div class="summary-card">
+                        <h3>📝 Latest Commit</h3>
+                        <div style="font-size: 0.9em; color: #888; margin-top: 10px;" id="git-commit">Loading...</div>
+                    </div>
+                    
+                    <div class="summary-card">
+                        <h3>🔄 Remote Status</h3>
+                        <div class="value" style="font-size: 1.3em;" id="git-remote">Loading...</div>
+                    </div>
+                </div>
+                
+                <!-- Detailed Info -->
+                <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-top: 20px;">
+                    <h3 style="margin-top: 0;">📋 Detailed Information</h3>
+                    <div id="git-details" style="font-family: 'Courier New', monospace; font-size: 0.9em; line-height: 1.8;">
+                        Loading git information...
+                    </div>
+                </div>
+                
+                <!-- Update Actions -->
+                <div style="background: #1e1e2e; padding: 20px; border-radius: 8px; margin-top: 20px; border: 1px solid #2a2a3e;">
+                    <h3 style="margin-top: 0;">🚀 Update Actions</h3>
+                    <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                        <button class="btn" style="background: #4caf50;" onclick="pullUpdates()">⬇️ Pull Latest Changes</button>
+                        <button class="btn" style="background: #ff9800;" onclick="restartDashboard()">🔄 Restart Dashboard</button>
+                        <button class="btn btn-secondary" onclick="viewUpdateLog()">📜 View Update Log</button>
+                    </div>
+                    <div id="update-status" style="margin-top: 15px; padding: 10px; background: #0d0d17; border-radius: 5px; font-family: 'Courier New', monospace; font-size: 0.85em; display: none;"></div>
+                </div>
+            </div>
+            
+            <!-- Server Info Section -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>🖥️ Server Information</h2>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                    <div class="summary-card">
+                        <h3>💻 Python Version</h3>
+                        <div class="value" style="font-size: 1.1em;" id="python-version">Loading...</div>
+                    </div>
+                    
+                    <div class="summary-card">
+                        <h3>📂 Working Directory</h3>
+                        <div style="font-size: 0.85em; color: #888; margin-top: 10px; word-break: break-all;" id="working-dir">Loading...</div>
+                    </div>
+                    
+                    <div class="summary-card">
+                        <h3>⏱️ Dashboard Uptime</h3>
+                        <div class="value" style="font-size: 1.1em;" id="dashboard-uptime">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div><!-- End System Tab -->
     </div>
     
     <!-- Add Bot Modal -->
@@ -1461,6 +1680,150 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     
     <script>
         let currentData = {};
+        let dashboardStartTime = Date.now();
+        
+        // Tab switching
+        function switchTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Remove active class from all tab buttons
+            document.querySelectorAll('.tab').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Show selected tab
+            document.getElementById(tabName + '-tab').classList.add('active');
+            
+            // Add active class to clicked button
+            event.target.classList.add('active');
+            
+            // Load data for the tab if needed
+            if (tabName === 'logs') {
+                refreshLogs();
+            } else if (tabName === 'system') {
+                refreshGitStatus();
+                updateServerInfo();
+            }
+        }
+        
+        // Git status functions
+        function refreshGitStatus() {
+            fetch('/api/git/status')
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        renderGitStatus(result);
+                    } else {
+                        document.getElementById('git-branch').textContent = 'Error';
+                        document.getElementById('git-status').textContent = 'Error';
+                        document.getElementById('git-commit').innerHTML = 'Error: ' + result.error;
+                        document.getElementById('git-remote').textContent = 'Error';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching git status:', error);
+                });
+        }
+        
+        function renderGitStatus(data) {
+            // Branch
+            document.getElementById('git-branch').textContent = data.branch;
+            
+            // Status
+            const statusEl = document.getElementById('git-status');
+            if (data.status.clean) {
+                statusEl.innerHTML = '<span style="color: #4caf50;">✓ Clean</span>';
+            } else {
+                statusEl.innerHTML = `<span style="color: #ff9800;">⚠️ ${data.status.changes_count} change(s)</span>`;
+            }
+            
+            // Commit
+            document.getElementById('git-commit').innerHTML = `
+                <div style="margin-bottom: 5px;"><strong>${data.commit.hash}</strong></div>
+                <div style="color: #bbb;">${data.commit.message}</div>
+                <div style="color: #888; font-size: 0.85em; margin-top: 5px;">
+                    by ${data.commit.author} • ${data.commit.date}
+                </div>
+            `;
+            
+            // Remote status
+            const remoteEl = document.getElementById('git-remote');
+            if (data.remote.status === 'up-to-date') {
+                remoteEl.innerHTML = '<span style="color: #4caf50;">✓ Up to date</span>';
+            } else if (data.remote.status === 'behind') {
+                remoteEl.innerHTML = `<span style="color: #ff9800;">⬇️ ${data.remote.behind} behind</span>`;
+            } else if (data.remote.status === 'ahead') {
+                remoteEl.innerHTML = `<span style="color: #2196f3;">⬆️ ${data.remote.ahead} ahead</span>`;
+            } else if (data.remote.status === 'diverged') {
+                remoteEl.innerHTML = `<span style="color: #f44336;">⚠️ Diverged</span>`;
+            } else {
+                remoteEl.innerHTML = '<span style="color: #888;">Unknown</span>';
+            }
+            
+            // Detailed info
+            let details = `<div style="color: #4caf50; margin-bottom: 10px;">✓ Git repository found</div>`;
+            details += `<div><strong>Branch:</strong> ${data.branch}</div>`;
+            details += `<div><strong>Latest Commit:</strong> ${data.commit.hash} - ${data.commit.message}</div>`;
+            details += `<div><strong>Author:</strong> ${data.commit.author}</div>`;
+            details += `<div><strong>Date:</strong> ${data.commit.date}</div>`;
+            details += `<div><strong>Working Tree:</strong> ${data.status.clean ? 'Clean ✓' : data.status.changes_count + ' uncommitted changes ⚠️'}</div>`;
+            
+            if (data.remote.status === 'behind') {
+                details += `<div style="color: #ff9800; margin-top: 10px;"><strong>⚠️ Your code is ${data.remote.behind} commit(s) behind origin/${data.branch}</strong></div>`;
+                details += `<div style="color: #888;">Click "Pull Latest Changes" to update</div>`;
+            } else if (data.remote.status === 'up-to-date') {
+                details += `<div style="color: #4caf50; margin-top: 10px;"><strong>✓ Your code is up to date!</strong></div>`;
+            }
+            
+            document.getElementById('git-details').innerHTML = details;
+        }
+        
+        function updateServerInfo() {
+            fetch('/api/git/status')
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        document.getElementById('python-version').textContent = result.python_version;
+                        document.getElementById('working-dir').textContent = result.working_dir;
+                        
+                        // Calculate uptime
+                        const uptime = Math.floor((Date.now() - dashboardStartTime) / 1000);
+                        const hours = Math.floor(uptime / 3600);
+                        const minutes = Math.floor((uptime % 3600) / 60);
+                        const seconds = uptime % 60;
+                        document.getElementById('dashboard-uptime').textContent = 
+                            `${hours}h ${minutes}m ${seconds}s`;
+                    }
+                })
+                .catch(error => console.error('Error fetching server info:', error));
+        }
+        
+        function pullUpdates() {
+            if (!confirm('Pull latest changes from git?\n\nThis will update your code to the latest version.')) {
+                return;
+            }
+            
+            const statusEl = document.getElementById('update-status');
+            statusEl.style.display = 'block';
+            statusEl.innerHTML = '⏳ Pulling latest changes...';
+            
+            // Note: This would need a new API endpoint to actually execute git pull
+            // For now, just show a message
+            setTimeout(() => {
+                statusEl.innerHTML = '⚠️ Manual update required. Run: git pull origin main';
+            }, 1000);
+        }
+        
+        function restartDashboard() {
+            alert('To restart the dashboard, run on your server:\n\nscreen -S dashboard -X quit\nscreen -dmS dashboard python3 advanced_dashboard.py');
+        }
+        
+        function viewUpdateLog() {
+            alert('To view update log, run on your server:\n\ntail -f /root/tradingbot/auto_update.log');
+        }
         
         // Update dashboard
         function updateDashboard() {
@@ -2194,6 +2557,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         setInterval(updateDashboard, 5000);
         setInterval(refreshLogs, 10000); // Refresh logs every 10 seconds
         setInterval(refreshSentiment, 30000); // Refresh sentiment every 30 seconds
+        setInterval(updateServerInfo, 1000); // Update uptime every second
     </script>
 </body>
 </html>"""
