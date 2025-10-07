@@ -8,6 +8,7 @@ import logging
 from datetime import datetime
 from binance_client import BinanceClient
 from config import Config
+from twilio_notifier import TwilioNotifier
 
 # Import all strategies
 from strategies.simple_profitable_strategy import SimpleProfitableStrategy
@@ -72,6 +73,9 @@ class BotRunner:
         self.take_profit = None
         self.trades_count = 0
         self.profit_total = 0.0
+        
+        # Initialize SMS notifier
+        self.sms_notifier = TwilioNotifier()
     
     def get_data(self, limit=100):
         """Fetch recent klines"""
@@ -117,6 +121,17 @@ class BotRunner:
                     self.logger.info(f"   Entry: ${current_price:.2f}")
                     self.logger.info(f"   Quantity: {quantity:.6f}")
                     self.logger.info(f"   Amount: ${self.trade_amount:.2f}")
+                    
+                    # Send SMS notification
+                    self.sms_notifier.send_trade_notification({
+                        'action': 'BUY',
+                        'symbol': self.symbol,
+                        'price': current_price,
+                        'quantity': quantity,
+                        'amount': self.trade_amount,
+                        'bot_name': self.bot_name
+                    })
+                    
                     return True
             
             elif signal == 'SELL' and self.position:
@@ -141,6 +156,18 @@ class BotRunner:
                         self.logger.info(f"🔴 CLOSED POSITION: {self.bot_name}")
                         self.logger.info(f"   Exit: ${current_price:.2f}")
                         self.logger.info(f"   Profit: ${profit:.2f} ({profit_pct:+.2f}%)")
+                        
+                        # Send SMS notification
+                        self.sms_notifier.send_trade_notification({
+                            'action': 'SELL',
+                            'symbol': self.symbol,
+                            'price': current_price,
+                            'quantity': quantity,
+                            'amount': current_price * quantity,
+                            'profit': profit,
+                            'profit_percent': profit_pct,
+                            'bot_name': self.bot_name
+                        })
                         
                         self.position = None
                         self.entry_price = None

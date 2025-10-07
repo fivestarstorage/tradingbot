@@ -283,6 +283,100 @@ def overview():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/logs')
+def get_logs():
+    """Get all bot logs with filtering"""
+    try:
+        bot_id = request.args.get('bot_id', None)
+        log_type = request.args.get('type', None)
+        search = request.args.get('search', '').lower()
+        limit = int(request.args.get('limit', 200))
+        
+        logs = []
+        
+        # Get all log files
+        import glob
+        log_files = glob.glob('bot_*.log') + glob.glob('live_trading_*.log')
+        
+        for log_file in sorted(log_files, reverse=True):
+            try:
+                with open(log_file, 'r') as f:
+                    lines = f.readlines()
+                
+                for line in lines[-500:]:  # Last 500 lines per file
+                    if len(line) < 20:
+                        continue
+                    
+                    try:
+                        parts = line.split(' - ')
+                        if len(parts) < 3:
+                            continue
+                        
+                        timestamp = parts[0]
+                        level = parts[1]
+                        message = ' - '.join(parts[2:]).strip()
+                        
+                        # Determine log type
+                        msg_lower = message.lower()
+                        if 'opened position' in msg_lower or '🟢' in message:
+                            type_tag = 'buy'
+                        elif 'closed position' in msg_lower or '🔴' in message:
+                            type_tag = 'sell'
+                        elif 'signal' in msg_lower or 'analyzing' in msg_lower:
+                            type_tag = 'signal'
+                        elif 'error' in msg_lower or 'failed' in msg_lower:
+                            type_tag = 'error'
+                        elif 'waiting' in msg_lower or 'hold' in msg_lower:
+                            type_tag = 'hold'
+                        else:
+                            type_tag = 'info'
+                        
+                        # Extract bot ID from filename
+                        if log_file.startswith('bot_'):
+                            file_bot_id = log_file.split('_')[1].split('.')[0]
+                        else:
+                            file_bot_id = 'main'
+                        
+                        # Apply filters
+                        if bot_id and file_bot_id != bot_id:
+                            continue
+                        
+                        if log_type and type_tag != log_type:
+                            continue
+                        
+                        if search and search not in message.lower():
+                            continue
+                        
+                        logs.append({
+                            'timestamp': timestamp,
+                            'level': level,
+                            'message': message,
+                            'type': type_tag,
+                            'bot_id': file_bot_id,
+                            'file': log_file
+                        })
+                    
+                    except:
+                        continue
+            
+            except:
+                continue
+        
+        # Sort by timestamp (newest first)
+        logs.sort(key=lambda x: x['timestamp'], reverse=True)
+        
+        return jsonify({
+            'success': True,
+            'logs': logs[:limit],
+            'total': len(logs)
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
 @app.route('/api/bot/add', methods=['POST'])
 def add_bot():
     """Add a new bot"""
@@ -718,6 +812,40 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <div class="empty-state">No trades yet...</div>
             </div>
         </div>
+        
+        <!-- Bot Logs Viewer -->
+        <div class="section">
+            <div class="section-header">
+                <h2>📜 Bot Logs</h2>
+                <button class="btn btn-sm" onclick="refreshLogs()">🔄 Refresh</button>
+            </div>
+            
+            <!-- Log Filters -->
+            <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                <select id="log-bot-filter" onchange="refreshLogs()" style="padding: 8px; background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 5px; color: white;">
+                    <option value="">All Bots</option>
+                </select>
+                
+                <select id="log-type-filter" onchange="refreshLogs()" style="padding: 8px; background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 5px; color: white;">
+                    <option value="">All Types</option>
+                    <option value="buy">🟢 Buys</option>
+                    <option value="sell">🔴 Sells</option>
+                    <option value="signal">📊 Signals</option>
+                    <option value="error">❌ Errors</option>
+                    <option value="hold">⏸️ Holds</option>
+                    <option value="info">ℹ️ Info</option>
+                </select>
+                
+                <input type="text" id="log-search" placeholder="Search logs..." onkeyup="refreshLogs()" style="flex: 1; min-width: 200px; padding: 8px; background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 5px; color: white;">
+                
+                <button class="btn btn-sm" onclick="clearLogFilters()">Clear Filters</button>
+            </div>
+            
+            <!-- Logs Display -->
+            <div id="logs-container" style="max-height: 600px; overflow-y: auto; background: #0f0f1e; padding: 15px; border-radius: 5px; font-family: 'Courier New', monospace; font-size: 0.85em;">
+                <div style="color: #888; text-align: center;">Loading logs...</div>
+            </div>
+        </div>
     </div>
     
     <!-- Add Bot Modal -->
@@ -1074,11 +1202,86 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             }
         }
         
+        // Logs functionality
+        function refreshLogs() {
+            const botFilter = document.getElementById('log-bot-filter').value;
+            const typeFilter = document.getElementById('log-type-filter').value;
+            const searchFilter = document.getElementById('log-search').value;
+            
+            let url = '/api/logs?limit=200';
+            if (botFilter) url += `&bot_id=${botFilter}`;
+            if (typeFilter) url += `&type=${typeFilter}`;
+            if (searchFilter) url += `&search=${encodeURIComponent(searchFilter)}`;
+            
+            fetch(url)
+                .then(response => response.json())
+                .then(result => {
+                    if (!result.success) {
+                        document.getElementById('logs-container').innerHTML = 
+                            '<div style="color: #f44336;">Error loading logs</div>';
+                        return;
+                    }
+                    
+                    const logsContainer = document.getElementById('logs-container');
+                    
+                    if (result.logs.length === 0) {
+                        logsContainer.innerHTML = '<div style="color: #888; text-align: center;">No logs found</div>';
+                        return;
+                    }
+                    
+                    // Update bot filter dropdown
+                    const botIds = [...new Set(result.logs.map(log => log.bot_id))];
+                    const currentBotFilter = document.getElementById('log-bot-filter').value;
+                    const botFilterHtml = '<option value="">All Bots</option>' + 
+                        botIds.map(id => `<option value="${id}" ${id === currentBotFilter ? 'selected' : ''}>Bot ${id}</option>`).join('');
+                    document.getElementById('log-bot-filter').innerHTML = botFilterHtml;
+                    
+                    // Render logs
+                    logsContainer.innerHTML = result.logs.map(log => {
+                        let color = '#fff';
+                        let icon = '';
+                        
+                        switch(log.type) {
+                            case 'buy': color = '#4caf50'; icon = '🟢'; break;
+                            case 'sell': color = '#f44336'; icon = '🔴'; break;
+                            case 'signal': color = '#2196f3'; icon = '📊'; break;
+                            case 'error': color = '#ff5722'; icon = '❌'; break;
+                            case 'hold': color = '#888'; icon = '⏸️'; break;
+                            default: color = '#aaa'; icon = 'ℹ️';
+                        }
+                        
+                        return `
+                            <div style="margin-bottom: 8px; padding: 8px; background: #1a1a2e; border-radius: 4px; border-left: 3px solid ${color};">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                                    <span style="color: #888; font-size: 0.9em;">${log.timestamp}</span>
+                                    <span style="color: ${color}; font-weight: bold;">${icon} Bot ${log.bot_id} | ${log.level}</span>
+                                </div>
+                                <div style="color: ${color};">${log.message}</div>
+                            </div>
+                        `;
+                    }).join('');
+                })
+                .catch(error => {
+                    console.error('Error fetching logs:', error);
+                    document.getElementById('logs-container').innerHTML = 
+                        '<div style="color: #f44336;">Connection error</div>';
+                });
+        }
+        
+        function clearLogFilters() {
+            document.getElementById('log-bot-filter').value = '';
+            document.getElementById('log-type-filter').value = '';
+            document.getElementById('log-search').value = '';
+            refreshLogs();
+        }
+        
         // Initial update
         updateDashboard();
+        refreshLogs();
         
         // Auto-refresh every 5 seconds
         setInterval(updateDashboard, 5000);
+        setInterval(refreshLogs, 10000); // Refresh logs every 10 seconds
     </script>
 </body>
 </html>"""

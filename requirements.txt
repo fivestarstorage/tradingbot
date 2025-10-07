@@ -22,3 +22,6 @@ flask>=2.3.0
 
 # AI News Trading (optional)
 openai>=1.0.0
+
+# SMS Notifications (optional)
+twilio>=8.0.0
