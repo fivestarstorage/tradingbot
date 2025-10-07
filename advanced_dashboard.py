@@ -676,6 +676,94 @@ def get_coin_details(symbol):
             'traceback': traceback.format_exc()
         })
 
+@app.route('/api/bot/<int:bot_id>/details')
+def get_bot_details(bot_id):
+    """Get comprehensive details about a specific bot"""
+    try:
+        manager = BotManager()
+        bots = manager.get_bots()
+        
+        # Find the bot
+        bot = next((b for b in bots if b['id'] == bot_id), None)
+        if not bot:
+            return jsonify({'success': False, 'error': 'Bot not found'})
+        
+        # Load position file for investment details
+        position_file = f"bot_{bot_id}_position.json"
+        investment_details = {
+            'initial_investment': bot.get('trade_amount', 0),
+            'capital_additions': [],
+            'total_investment': bot.get('trade_amount', 0),
+            'has_traded': False
+        }
+        
+        if os.path.exists(position_file):
+            try:
+                with open(position_file, 'r') as f:
+                    pos_data = json.load(f)
+                    investment_details.update({
+                        'initial_investment': pos_data.get('initial_investment', bot.get('trade_amount', 0)),
+                        'capital_additions': pos_data.get('capital_additions', []),
+                        'has_traded': pos_data.get('has_traded', False)
+                    })
+                    total_added = sum(add['amount'] for add in investment_details['capital_additions'])
+                    investment_details['total_investment'] = investment_details['initial_investment'] + total_added
+            except:
+                pass
+        
+        # Get bot-specific logs
+        bot_logs = []
+        log_file = f"bot_{bot_id}.log"
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, 'r') as f:
+                    lines = f.readlines()
+                
+                for line in lines[-100:]:  # Last 100 lines
+                    if len(line) > 20:
+                        bot_logs.append(line.strip())
+            except:
+                pass
+        
+        # Parse trades from logs
+        trades = []
+        for line in bot_logs:
+            if 'OPENED POSITION' in line or 'CLOSED POSITION' in line:
+                trades.append({
+                    'timestamp': line.split(' - ')[0] if ' - ' in line else '',
+                    'action': 'BUY' if 'OPENED' in line else 'SELL',
+                    'details': line.split(':')[1].strip() if ':' in line else line
+                })
+        
+        # Get current position from bot data
+        current_position = bot.get('position', None)
+        
+        return jsonify({
+            'success': True,
+            'bot': {
+                'id': bot['id'],
+                'name': bot['name'],
+                'symbol': bot['symbol'],
+                'strategy': bot['strategy'],
+                'status': bot['status'],
+                'trade_amount': bot['trade_amount'],
+                'trades_count': bot.get('trades', 0),
+                'profit': bot.get('profit', 0)
+            },
+            'investment': investment_details,
+            'current_position': current_position,
+            'trade_history': trades[-20:],  # Last 20 trades
+            'recent_logs': bot_logs[-50:]  # Last 50 log lines
+        })
+    
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        })
+
 @app.route('/api/logs')
 def get_logs():
     """Get all bot logs with filtering"""
@@ -1678,6 +1766,24 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
     </div>
     
+    <!-- Bot Details Modal -->
+    <div class="modal" id="bot-details-modal">
+        <div class="modal-content" style="max-width: 900px;">
+            <h2 id="bot-modal-title">🤖 Bot Details</h2>
+            
+            <div id="bot-modal-body" style="max-height: 70vh; overflow-y: auto;">
+                <!-- Dynamic content loaded here -->
+                <div style="text-align: center; padding: 40px; color: #888;">
+                    Loading bot details...
+                </div>
+            </div>
+            
+            <div class="form-actions" style="margin-top: 20px;">
+                <button class="btn btn-secondary" onclick="hideBotModal()">Close</button>
+            </div>
+        </div>
+    </div>
+    
     <script>
         let currentData = {};
         let dashboardStartTime = Date.now();
@@ -1967,9 +2073,9 @@ tail -f /root/tradingbot/auto_update.log`);
             }
             
             grid.innerHTML = bots.map(bot => `
-                <div class="bot-card">
+                <div class="bot-card" style="cursor: pointer;" onclick="event.stopPropagation(); if (!event.target.closest('button')) showBotDetails(${bot.id});" title="Click for full details">
                     <div class="bot-header">
-                        <div class="bot-title">${bot.name}</div>
+                        <div class="bot-title">${bot.name} <span style="font-size: 0.7em; color: #667eea;">🔍</span></div>
                         <div class="bot-status ${bot.status}" title="Verified against screen sessions">
                             ${bot.status.toUpperCase()} ✓
                         </div>
@@ -2336,6 +2442,233 @@ tail -f /root/tradingbot/auto_update.log`);
         
         function hideCoinModal() {
             document.getElementById('coin-details-modal').style.display = 'none';
+        }
+        
+        // Bot Details Modal Functions
+        function showBotDetails(botId) {
+            document.getElementById('bot-details-modal').style.display = 'flex';
+            document.getElementById('bot-modal-title').textContent = `🤖 Bot #${botId} Details`;
+            document.getElementById('bot-modal-body').innerHTML = `
+                <div style="text-align: center; padding: 40px; color: #888;">
+                    <div class="spinner"></div>
+                    Loading bot details...
+                </div>
+            `;
+            
+            // Fetch bot details
+            fetch(`/api/bot/${botId}/details`)
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        renderBotDetails(result);
+                    } else {
+                        document.getElementById('bot-modal-body').innerHTML = `
+                            <div style="text-align: center; padding: 40px; color: #f44336;">
+                                ❌ Error loading bot details: ${result.error}
+                            </div>
+                        `;
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('bot-modal-body').innerHTML = `
+                        <div style="text-align: center; padding: 40px; color: #f44336;">
+                            ❌ Connection error: ${error.message}
+                        </div>
+                    `;
+                });
+        }
+        
+        function hideBotModal() {
+            document.getElementById('bot-details-modal').style.display = 'none';
+        }
+        
+        function renderBotDetails(data) {
+            const modalBody = document.getElementById('bot-modal-body');
+            const bot = data.bot;
+            const investment = data.investment;
+            const profitPct = investment.total_investment > 0 ? ((bot.profit / investment.total_investment) * 100) : 0;
+            const profitColor = bot.profit >= 0 ? '#4caf50' : '#f44336';
+            
+            modalBody.innerHTML = `
+                <!-- Bot Summary -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px;">
+                        <div style="color: #888; font-size: 0.9em; margin-bottom: 5px;">Status</div>
+                        <div style="font-size: 1.3em; font-weight: bold; color: ${bot.status === 'running' ? '#4caf50' : '#f44336'};">
+                            ${bot.status === 'running' ? '🟢 RUNNING' : '⏸️ STOPPED'}
+                        </div>
+                    </div>
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px;">
+                        <div style="color: #888; font-size: 0.9em; margin-bottom: 5px;">Trading Symbol</div>
+                        <div style="font-size: 1.3em; font-weight: bold;">${bot.symbol}</div>
+                    </div>
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px;">
+                        <div style="color: #888; font-size: 0.9em; margin-bottom: 5px;">Strategy</div>
+                        <div style="font-size: 1em; font-weight: bold;">${bot.strategy.replace('_', ' ').toUpperCase()}</div>
+                    </div>
+                </div>
+                
+                <!-- Investment Details -->
+                <div style="background: linear-gradient(135deg, #1a1a2e 0%, #0f0f1e 100%); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 2px solid #667eea;">
+                    <h3 style="margin: 0 0 15px 0; color: #667eea;">💰 Investment Breakdown</h3>
+                    
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 15px;">
+                        <div>
+                            <div style="color: #888; font-size: 0.9em;">Initial Investment</div>
+                            <div style="font-size: 1.5em; font-weight: bold; color: #fff;">$${investment.initial_investment.toFixed(2)}</div>
+                        </div>
+                        ${investment.capital_additions.length > 0 ? `
+                            <div>
+                                <div style="color: #888; font-size: 0.9em;">Additional Funds</div>
+                                <div style="font-size: 1.5em; font-weight: bold; color: #4caf50;">
+                                    +$${investment.capital_additions.reduce((sum, add) => sum + add.amount, 0).toFixed(2)}
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                    
+                    ${investment.capital_additions.length > 0 ? `
+                        <div style="background: #16161f; padding: 12px; border-radius: 6px; margin-bottom: 15px;">
+                            <div style="font-weight: bold; margin-bottom: 8px; color: #888;">Capital Addition History:</div>
+                            ${investment.capital_additions.map(add => `
+                                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #2a2a3e;">
+                                    <span style="color: #aaa;">${formatDateTime(add.timestamp)}</span>
+                                    <span style="color: #4caf50; font-weight: bold;">+$${add.amount.toFixed(2)}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : ''}
+                    
+                    <div style="padding-top: 15px; border-top: 2px solid #2a2a3e;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="color: #888; font-size: 0.9em;">Total Investment</div>
+                                <div style="font-size: 1.8em; font-weight: bold; color: #667eea;">$${investment.total_investment.toFixed(2)}</div>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="color: #888; font-size: 0.9em;">Current Profit/Loss</div>
+                                <div style="font-size: 1.8em; font-weight: bold; color: ${profitColor};">
+                                    ${bot.profit >= 0 ? '+' : ''}$${bot.profit.toFixed(2)}
+                                </div>
+                                <div style="font-size: 1.2em; color: ${profitColor};">
+                                    ${profitPct >= 0 ? '+' : ''}${profitPct.toFixed(2)}%
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    ${!investment.has_traded ? `
+                        <div style="background: #ff9800; color: #000; padding: 10px; border-radius: 6px; margin-top: 15px; text-align: center;">
+                            ⚠️ Bot hasn't made its first trade yet
+                        </div>
+                    ` : ''}
+                </div>
+                
+                <!-- Current Position -->
+                ${data.current_position ? `
+                    <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #4caf50;">
+                        <h3 style="margin: 0 0 15px 0;">📊 Current Position</h3>
+                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+                            <div>
+                                <div style="color: #888; font-size: 0.9em;">Entry Price</div>
+                                <div style="font-size: 1.3em; font-weight: bold;">$${data.current_position.entry_price?.toFixed(2) || 'N/A'}</div>
+                            </div>
+                            <div>
+                                <div style="color: #888; font-size: 0.9em;">Current Price</div>
+                                <div style="font-size: 1.3em; font-weight: bold;">$${data.current_position.current_price?.toFixed(2) || 'N/A'}</div>
+                            </div>
+                            <div>
+                                <div style="color: #888; font-size: 0.9em;">Position P&L</div>
+                                <div style="font-size: 1.3em; font-weight: bold; color: ${data.current_position.pnl_pct >= 0 ? '#4caf50' : '#f44336'};">
+                                    ${data.current_position.pnl_pct >= 0 ? '+' : ''}${data.current_position.pnl_pct?.toFixed(2) || '0.00'}%
+                                </div>
+                            </div>
+                            <div>
+                                <div style="color: #888; font-size: 0.9em;">Symbol</div>
+                                <div style="font-size: 1.3em; font-weight: bold;">${data.current_position.symbol || bot.symbol}</div>
+                            </div>
+                        </div>
+                        ${data.current_position.ai_reasoning ? `
+                            <div style="background: rgba(76, 175, 80, 0.1); padding: 12px; border-radius: 6px; margin-top: 15px; border-left: 3px solid #4caf50;">
+                                <div style="font-weight: bold; color: #4caf50; margin-bottom: 5px;">🤖 AI Reasoning:</div>
+                                <div style="color: #ccc;">${data.current_position.ai_reasoning}</div>
+                            </div>
+                        ` : ''}
+                    </div>
+                ` : `
+                    <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 20px; text-align: center; color: #888;">
+                        No active position - Bot is waiting for next buy signal
+                    </div>
+                `}
+                
+                <!-- Performance Stats -->
+                <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                    <h3 style="margin: 0 0 15px 0;">📈 Performance Stats</h3>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+                        <div style="text-align: center; padding: 15px; background: #16161f; border-radius: 6px;">
+                            <div style="color: #888; font-size: 0.85em; margin-bottom: 5px;">Total Trades</div>
+                            <div style="font-size: 1.8em; font-weight: bold; color: #667eea;">${bot.trades_count}</div>
+                        </div>
+                        <div style="text-align: center; padding: 15px; background: #16161f; border-radius: 6px;">
+                            <div style="color: #888; font-size: 0.85em; margin-bottom: 5px;">ROI</div>
+                            <div style="font-size: 1.8em; font-weight: bold; color: ${profitColor};">
+                                ${profitPct >= 0 ? '+' : ''}${profitPct.toFixed(1)}%
+                            </div>
+                        </div>
+                        <div style="text-align: center; padding: 15px; background: #16161f; border-radius: 6px;">
+                            <div style="color: #888; font-size: 0.85em; margin-bottom: 5px;">Total P&L</div>
+                            <div style="font-size: 1.8em; font-weight: bold; color: ${profitColor};">
+                                ${bot.profit >= 0 ? '+' : ''}$${bot.profit.toFixed(2)}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Trade History -->
+                ${data.trade_history && data.trade_history.length > 0 ? `
+                    <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                        <h3 style="margin: 0 0 15px 0;">📜 Trade History (Last 20)</h3>
+                        <div style="max-height: 300px; overflow-y: auto;">
+                            ${data.trade_history.map(trade => {
+                                const isBuy = trade.action === 'BUY';
+                                const color = isBuy ? '#4caf50' : '#f44336';
+                                const icon = isBuy ? '🟢' : '🔴';
+                                return `
+                                    <div style="background: #16161f; padding: 12px; border-radius: 6px; margin-bottom: 8px; border-left: 3px solid ${color};">
+                                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                                            <span style="color: ${color}; font-weight: bold;">${icon} ${trade.action}</span>
+                                            <span style="color: #888; font-size: 0.9em;">${formatDateTime(trade.timestamp)}</span>
+                                        </div>
+                                        <div style="color: #ccc; font-size: 0.9em;">${trade.details}</div>
+                                    </div>
+                                `;
+                            }).reverse().join('')}
+                        </div>
+                    </div>
+                ` : `
+                    <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 20px; text-align: center; color: #888;">
+                        No trade history yet
+                    </div>
+                `}
+                
+                <!-- Recent Logs -->
+                ${data.recent_logs && data.recent_logs.length > 0 ? `
+                    <div style="background: #1a1a2e; padding: 20px; border-radius: 8px;">
+                        <h3 style="margin: 0 0 15px 0;">📋 Recent Activity Logs (Last 50)</h3>
+                        <div style="max-height: 300px; overflow-y: auto; background: #0f0f1e; padding: 12px; border-radius: 6px; font-family: 'Courier New', monospace; font-size: 0.8em;">
+                            ${data.recent_logs.map(log => `
+                                <div style="padding: 4px 0; border-bottom: 1px solid #2a2a3e; color: #aaa;">
+                                    ${log}
+                                </div>
+                            `).reverse().join('')}
+                        </div>
+                    </div>
+                ` : `
+                    <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; text-align: center; color: #888;">
+                        No logs available yet
+                    </div>
+                `}
+            `;
         }
         
         function renderCoinDetails(data) {
