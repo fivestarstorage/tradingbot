@@ -17,10 +17,12 @@ from strategies.mean_reversion_strategy import MeanReversionStrategy
 from strategies.breakout_strategy import BreakoutStrategy
 from strategies.conservative_strategy import ConservativeStrategy
 from strategies.ai_news_strategy import AINewsStrategy
+from strategies.ai_autonomous_strategy import AIAutonomousStrategy
 
 # Strategy mapping
 STRATEGIES = {
     'simple_profitable': SimpleProfitableStrategy,
+    'ai_autonomous': AIAutonomousStrategy,
     'ai_news': AINewsStrategy,
     'momentum': EnhancedStrategy,
     'mean_reversion': MeanReversionStrategy,

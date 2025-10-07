@@ -64,9 +64,10 @@ Provide your analysis in the following JSON format:
     "sentiment": "bullish" or "bearish" or "neutral",
     "impact": "high" or "medium" or "low",
     "reasoning": "brief explanation of your analysis",
-    "symbols": ["list", "of", "affected", "symbols", "like", "BTCUSDT"],
+    "symbols": ["BTCUSDT", "ETHUSDT", etc. - ONLY coins directly mentioned or affected],
     "urgency": "immediate" or "short-term" or "long-term",
-    "key_points": ["key", "point", "1", "key", "point", "2"]
+    "key_points": ["key", "point", "1", "key", "point", "2"],
+    "primary_coin": "The MAIN coin this news affects (e.g. BTCUSDT)"
 }}
 
 Consider:
