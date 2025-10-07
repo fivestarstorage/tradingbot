@@ -141,24 +141,28 @@ class NewsMonitor:
             return []
         
         try:
-            # Use the /news endpoint for latest crypto news
+            # Use the correct CryptoNews API endpoint
+            # According to docs: https://cryptonews-api.com/documentation
+            # Endpoint: /api/v1 with ?auth_token=XXX&items=50
             params = {
-                'tickers': 'BTC,ETH,SOL,XRP,ADA,DOGE,MATIC,AVAX,DOT,LINK',  # Focus on major coins
+                'auth_token': self.cryptonews_key,
                 'items': items,
-                'token': self.cryptonews_key
+                'page': 1
             }
             
-            response = requests.get(f"{self.cryptonews_url}/news", params=params, timeout=15)
+            # Use base endpoint (not /news)
+            response = requests.get(self.cryptonews_url, params=params, timeout=15)
             response.raise_for_status()
             
             data = response.json()
             
-            if data.get('status') != 'success':
-                logger.error(f"CryptoNews API error: {data.get('message', 'Unknown error')}")
-                return []
-            
+            # CryptoNews API returns data directly in 'data' field
             articles = []
             news_data = data.get('data', [])
+            
+            if not news_data:
+                logger.warning("CryptoNews API returned no articles")
+                return []
             
             for article in news_data:
                 article_id = f"cryptonews_{article.get('news_url', '')}"
