@@ -44,7 +44,7 @@ class AIAutonomousStrategy:
         self.sentiment_tracker = AISentimentTracker()
         
         # Configuration
-        self.min_confidence = 80  # Higher threshold for autonomous trading
+        self.min_confidence = 70  # Lowered threshold for more trading opportunities
         self.max_articles_per_cycle = 20  # Analyze MORE news articles
         
         # NO MORE HARDCODED LIST! 
@@ -368,6 +368,10 @@ class AIAutonomousStrategy:
             # Find best opportunity
             buy_recs = [r for r in recommendations if r['signal'] == 'BUY' and r['confidence'] >= self.min_confidence]
             sell_recs = [r for r in recommendations if r['signal'] == 'SELL' and r['confidence'] >= self.min_confidence]
+            
+            logger.info(f"📊 Found {len(recommendations)} total recommendations")
+            logger.info(f"   BUY signals >= {self.min_confidence}%: {len(buy_recs)}")
+            logger.info(f"   SELL signals >= {self.min_confidence}%: {len(sell_recs)}")
             
             best_rec = None
             
