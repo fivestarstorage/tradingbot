@@ -163,20 +163,27 @@ class BotRunner:
             # Get symbol info to find precision
             symbol_info = self.client.get_symbol_info(symbol)
             
-            if not symbol_info:
-                # Default to 6 decimal places if can't get info
+            if not symbol_info or 'filters' not in symbol_info:
+                self.logger.warning(f"No symbol info for {symbol}, using 6 decimals")
                 return float(f"{quantity:.6f}")
             
             # Find LOT_SIZE filter
-            for filter_item in symbol_info['filters']:
-                if filter_item['filterType'] == 'LOT_SIZE':
-                    step_size = float(filter_item['stepSize'])
+            filters = symbol_info.get('filters', [])
+            if not filters:
+                self.logger.warning(f"No filters for {symbol}, using 6 decimals")
+                return float(f"{quantity:.6f}")
+            
+            for filter_item in filters:
+                if filter_item.get('filterType') == 'LOT_SIZE':
+                    step_size = float(filter_item.get('stepSize', 0.000001))
                     
                     # Calculate precision from step_size
                     # e.g., 0.00001 -> 5 decimal places
                     precision = 0
                     if step_size < 1:
-                        precision = len(str(step_size).rstrip('0').split('.')[1])
+                        step_size_str = f"{step_size:.10f}".rstrip('0')
+                        if '.' in step_size_str:
+                            precision = len(step_size_str.split('.')[1])
                     
                     # Round quantity to the correct precision
                     formatted = round(quantity, precision)
@@ -185,25 +192,45 @@ class BotRunner:
                     if precision > 0:
                         formatted = float(f"{formatted:.{precision}f}")
                     
-                    self.logger.info(f"Formatted quantity: {quantity} -> {formatted} (precision: {precision})")
+                    self.logger.info(f"✅ Formatted quantity: {quantity:.8f} -> {formatted} (precision: {precision})")
                     return formatted
             
             # If no LOT_SIZE filter found, use 6 decimals
+            self.logger.warning(f"No LOT_SIZE filter for {symbol}, using 6 decimals")
             return float(f"{quantity:.6f}")
             
         except Exception as e:
             self.logger.error(f"Error formatting quantity: {e}, using 6 decimals")
+            import traceback
+            self.logger.error(traceback.format_exc())
             return float(f"{quantity:.6f}")
     
     def execute_trade(self, signal, current_price, signal_data=None):
         """Execute buy/sell orders"""
         try:
             if signal == 'BUY' and not self.position:
+                # Check USDT balance first
+                usdt_balance = self.client.get_account_balance('USDT')
+                available_usdt = float(usdt_balance['free']) if usdt_balance else 0
+                
+                if available_usdt < self.trade_amount:
+                    self.logger.error(f"❌ Insufficient USDT balance!")
+                    self.logger.error(f"   Required: ${self.trade_amount:.2f}")
+                    self.logger.error(f"   Available: ${available_usdt:.2f}")
+                    self.logger.error(f"   Shortfall: ${self.trade_amount - available_usdt:.2f}")
+                    return False
+                
                 # Calculate quantity
                 raw_quantity = self.trade_amount / current_price
                 
                 # Format quantity to match Binance precision rules
                 quantity = self.format_quantity(self.symbol, raw_quantity)
+                
+                self.logger.info(f"💰 Balance check: ${available_usdt:.2f} USDT available")
+                self.logger.info(f"📊 Placing BUY order:")
+                self.logger.info(f"   Symbol: {self.symbol}")
+                self.logger.info(f"   Quantity: {quantity}")
+                self.logger.info(f"   Est. Cost: ${self.trade_amount:.2f}")
                 
                 # Place order
                 order = self.client.place_market_order(
