@@ -90,6 +90,58 @@ class BotRunner:
         
         # Initialize SMS notifier
         self.sms_notifier = TwilioNotifier()
+        
+        # Position persistence file
+        self.position_file = f'bot_{self.bot_id}_position.json'
+        self._load_position()
+    
+    def _load_position(self):
+        """Load saved position from file (if exists)"""
+        try:
+            import json
+            if os.path.exists(self.position_file):
+                with open(self.position_file, 'r') as f:
+                    data = json.load(f)
+                    self.position = data.get('position')
+                    self.entry_price = data.get('entry_price')
+                    self.stop_loss = data.get('stop_loss')
+                    self.take_profit = data.get('take_profit')
+                    self.symbol = data.get('symbol', self.symbol)
+                    self.logger.info("=" * 70)
+                    self.logger.info(f"📂 LOADED EXISTING POSITION FROM FILE")
+                    self.logger.info(f"   Symbol: {self.symbol}")
+                    self.logger.info(f"   Entry: ${self.entry_price:.2f}")
+                    self.logger.info(f"   Stop Loss: ${self.stop_loss:.2f}")
+                    self.logger.info(f"   Take Profit: ${self.take_profit:.2f}")
+                    self.logger.info("=" * 70)
+        except Exception as e:
+            self.logger.error(f"Error loading position: {e}")
+    
+    def _save_position(self):
+        """Save current position to file"""
+        try:
+            import json
+            data = {
+                'position': self.position,
+                'entry_price': self.entry_price,
+                'stop_loss': self.stop_loss,
+                'take_profit': self.take_profit,
+                'symbol': self.symbol,
+                'timestamp': datetime.now().isoformat()
+            }
+            with open(self.position_file, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            self.logger.error(f"Error saving position: {e}")
+    
+    def _clear_position_file(self):
+        """Delete position file when position is closed"""
+        try:
+            if os.path.exists(self.position_file):
+                os.remove(self.position_file)
+                self.logger.info("🗑️ Cleared position file")
+        except Exception as e:
+            self.logger.error(f"Error deleting position file: {e}")
     
     def get_data(self, limit=100):
         """Fetch recent klines - return raw format for strategy.analyze()"""
@@ -165,6 +217,9 @@ class BotRunner:
                     self.entry_price = current_price
                     self.stop_loss = current_price * 0.98  # 2% stop loss
                     self.take_profit = current_price * 1.03  # 3% take profit
+                    
+                    # SAVE POSITION TO FILE (persists across restarts!)
+                    self._save_position()
                     
                     # Notify strategy about position (for AI strategies)
                     if hasattr(self.strategy, 'set_position'):
@@ -247,6 +302,10 @@ class BotRunner:
                         self.entry_price = None
                         self.trades_count += 1
                         self.profit_total += profit
+                        
+                        # CLEAR POSITION FILE (no longer in position)
+                        self._clear_position_file()
+                        
                         return True
         
         except Exception as e:
