@@ -127,12 +127,14 @@ class NewsMonitor:
         except requests.exceptions.RequestException as e:
             error_msg = str(e)
             if '429' in error_msg:
-                logger.warning(f"⚠️ NewsAPI rate limit hit! Using cached articles if available...")
-                # Return cached articles if we have them
+                logger.warning(f"⚠️ NewsAPI rate limit hit!")
+                # Try cache first
                 if self.cached_articles:
                     logger.info(f"📦 Returning {len(self.cached_articles)} cached articles")
                     return self.cached_articles
-                logger.error(f"No cached articles available. Please wait 10 minutes before restarting bot.")
+                # Otherwise use FREE CoinDesk RSS
+                logger.info(f"📰 Falling back to FREE CoinDesk RSS feed...")
+                return self.fetch_coindesk_news()
             else:
                 logger.error(f"Error fetching news: {e}")
             return []
@@ -209,6 +211,44 @@ class NewsMonitor:
         
         except Exception as e:
             logger.error(f"Error fetching tech news: {e}")
+            return []
+    
+    def fetch_coindesk_news(self):
+        """
+        Fetch crypto news from CoinDesk RSS (FREE, no API key needed!)
+        Alternative to NewsAPI when rate limited
+        """
+        try:
+            import feedparser
+            
+            url = "https://www.coindesk.com/arc/outboundfeeds/rss/"
+            feed = feedparser.parse(url)
+            
+            articles = []
+            for entry in feed.entries[:20]:  # Get latest 20
+                article_id = f"coindesk_{entry.published}"
+                
+                if article_id in self.seen_articles:
+                    continue
+                
+                self.seen_articles.add(article_id)
+                
+                articles.append({
+                    'id': article_id,
+                    'title': entry.title,
+                    'description': entry.summary if hasattr(entry, 'summary') else '',
+                    'content': entry.summary if hasattr(entry, 'summary') else '',
+                    'source': 'CoinDesk',
+                    'url': entry.link,
+                    'published_at': entry.published,
+                    'timestamp': datetime.now()
+                })
+            
+            logger.info(f"📰 Fetched {len(articles)} articles from CoinDesk RSS (FREE!)")
+            return articles
+        
+        except Exception as e:
+            logger.error(f"Error fetching CoinDesk news: {e}")
             return []
     
     def fetch_coingecko_trending(self):
