@@ -2081,8 +2081,20 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         
         // Show/hide modals
         function showAddBotModal() {
-            document.getElementById('add-bot-modal').style.display = 'flex';
-            updateSymbolHelp(); // Initialize help text
+            try {
+                const modal = document.getElementById('add-bot-modal');
+                if (!modal) {
+                    console.error('❌ Modal not found!');
+                    alert('Error: Modal element not found. Try refreshing the page.');
+                    return;
+                }
+                console.log('✓ Opening Add Bot modal');
+                modal.style.display = 'flex';
+                updateSymbolHelp(); // Initialize help text
+            } catch (error) {
+                console.error('❌ Error opening modal:', error);
+                alert('Error opening modal: ' + error.message);
+            }
         }
         
         function hideAddBotModal() {
@@ -2630,6 +2642,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         setInterval(refreshLogs, 10000); // Refresh logs every 10 seconds
         setInterval(refreshSentiment, 30000); // Refresh sentiment every 30 seconds
         setInterval(updateServerInfo, 1000); // Update uptime every second
+        
+        // Verify dashboard loaded
+        console.log('✅ Dashboard JavaScript loaded successfully');
+        console.log('✅ Modal functions available:', typeof showAddBotModal === 'function');
     </script>
 </body>
 </html>"""
