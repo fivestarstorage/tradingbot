@@ -18,10 +18,19 @@ class NewsMonitor:
         
         # Track seen articles to avoid duplicates
         self.seen_articles = set()
+        
+        # CACHING to reduce API calls
+        self.cached_articles = []
+        self.cache_time = None
+        self.cache_duration = 600  # Cache for 10 minutes (600 seconds)
+        
+        # Rate limiting
+        self.last_api_call = None
+        self.min_call_interval = 60  # Minimum 60 seconds between API calls
     
     def fetch_crypto_news(self, symbols=['BTC', 'ETH', 'crypto', 'bitcoin', 'ethereum'], hours_back=1):
         """
-        Fetch recent crypto news
+        Fetch recent crypto news (WITH CACHING to avoid rate limits)
         
         Args:
             symbols: List of keywords to search for
@@ -33,6 +42,21 @@ class NewsMonitor:
         if not self.newsapi_key:
             logger.warning("No NewsAPI key provided")
             return []
+        
+        # CHECK CACHE FIRST
+        if self.cache_time and self.cached_articles:
+            time_since_cache = (datetime.now() - self.cache_time).total_seconds()
+            if time_since_cache < self.cache_duration:
+                logger.info(f"📦 Using cached articles ({len(self.cached_articles)} articles, {int(self.cache_duration - time_since_cache)}s until refresh)")
+                return self.cached_articles
+        
+        # RATE LIMITING - wait if called too recently
+        if self.last_api_call:
+            time_since_last = (datetime.now() - self.last_api_call).total_seconds()
+            if time_since_last < self.min_call_interval:
+                wait_time = self.min_call_interval - time_since_last
+                logger.info(f"⏳ Rate limit: waiting {int(wait_time)}s before next API call...")
+                time.sleep(wait_time)
         
         # Build query
         query = ' OR '.join(symbols)
@@ -83,6 +107,9 @@ class NewsMonitor:
             
             logger.info(f"Fetched {len(articles)} crypto-specific articles")
             
+            # Update rate limiting tracker
+            self.last_api_call = datetime.now()
+            
             # If we got very few articles, expand to general tech/business news
             if len(articles) < 5:
                 logger.info(f"Only {len(articles)} crypto articles, expanding to tech/business news...")
@@ -90,23 +117,47 @@ class NewsMonitor:
                 articles.extend(tech_articles)
                 logger.info(f"Total: {len(articles)} articles (AI will filter for crypto relevance)")
             
+            # UPDATE CACHE
+            self.cached_articles = articles
+            self.cache_time = datetime.now()
+            logger.info(f"💾 Cached {len(articles)} articles for {self.cache_duration}s")
+            
             return articles
         
         except requests.exceptions.RequestException as e:
-            logger.error(f"Error fetching news: {e}")
-            # Fallback to tech news
-            return self.fetch_tech_news(hours_back)
+            error_msg = str(e)
+            if '429' in error_msg:
+                logger.warning(f"⚠️ NewsAPI rate limit hit! Using cached articles if available...")
+                # Return cached articles if we have them
+                if self.cached_articles:
+                    logger.info(f"📦 Returning {len(self.cached_articles)} cached articles")
+                    return self.cached_articles
+                logger.error(f"No cached articles available. Please wait 10 minutes before restarting bot.")
+            else:
+                logger.error(f"Error fetching news: {e}")
+            return []
         except Exception as e:
             logger.error(f"Unexpected error: {e}")
+            # Return cache if available
+            if self.cached_articles:
+                return self.cached_articles
             return []
     
     def fetch_tech_news(self, hours_back=2):
         """
         Fetch general tech and business news
         AI will filter for crypto/blockchain relevance
+        (WITH RATE LIMITING)
         """
         if not self.newsapi_key:
             return []
+        
+        # RATE LIMITING - avoid double API calls
+        if self.last_api_call:
+            time_since_last = (datetime.now() - self.last_api_call).total_seconds()
+            if time_since_last < 10:  # Wait at least 10 seconds between calls
+                logger.info(f"⏳ Skipping tech news fetch (too soon after last call)")
+                return []
         
         from_time = (datetime.now() - timedelta(hours=hours_back)).isoformat()
         
