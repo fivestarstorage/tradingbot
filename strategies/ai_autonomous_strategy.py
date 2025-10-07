@@ -69,6 +69,11 @@ class AIAutonomousStrategy:
         self.recent_analyses = []
         self.max_cache = 50
         
+        # AI ANALYSIS CACHE (CRITICAL to avoid repeated OpenAI calls!)
+        self.ai_analysis_cache = {}  # article_id -> analysis result
+        self.analysis_cache_time = {}  # article_id -> timestamp
+        self.analysis_cache_duration = 28800  # 8 hours (same as news cache)
+        
         # Last decision
         self.last_decision = None
     
@@ -235,7 +240,24 @@ class AIAutonomousStrategy:
                 
                 if articles:
                     for article in articles[:5]:  # Check recent articles
-                        analysis = self.ai_analyzer.analyze_news(article)
+                        article_id = article.get('id', article['url'])
+                        
+                        # CHECK AI ANALYSIS CACHE FIRST
+                        from datetime import datetime
+                        now = datetime.now()
+                        
+                        if article_id in self.ai_analysis_cache and article_id in self.analysis_cache_time:
+                            cache_age = (now - self.analysis_cache_time[article_id]).total_seconds()
+                            if cache_age < self.analysis_cache_duration:
+                                analysis = self.ai_analysis_cache[article_id]
+                            else:
+                                analysis = self.ai_analyzer.analyze_news(article)
+                                self.ai_analysis_cache[article_id] = analysis
+                                self.analysis_cache_time[article_id] = now
+                        else:
+                            analysis = self.ai_analyzer.analyze_news(article)
+                            self.ai_analysis_cache[article_id] = analysis
+                            self.analysis_cache_time[article_id] = now
                         
                         # If negative news with high confidence, sell
                         if analysis['signal'] == 'SELL' and analysis['confidence'] >= 75:
@@ -303,7 +325,28 @@ class AIAutonomousStrategy:
             recommendations = []
             
             for article in articles[:self.max_articles_per_cycle]:
-                analysis = self.ai_analyzer.analyze_news(article)
+                article_id = article.get('id', article['url'])
+                
+                # CHECK AI ANALYSIS CACHE FIRST (avoid repeated OpenAI calls!)
+                from datetime import datetime, timedelta
+                now = datetime.now()
+                
+                if article_id in self.ai_analysis_cache and article_id in self.analysis_cache_time:
+                    cache_age = (now - self.analysis_cache_time[article_id]).total_seconds()
+                    if cache_age < self.analysis_cache_duration:
+                        # Use cached analysis
+                        analysis = self.ai_analysis_cache[article_id]
+                        logger.info(f"  💾 Using cached AI analysis for: {article['title'][:50]}...")
+                    else:
+                        # Cache expired, re-analyze
+                        analysis = self.ai_analyzer.analyze_news(article)
+                        self.ai_analysis_cache[article_id] = analysis
+                        self.analysis_cache_time[article_id] = now
+                else:
+                    # Not in cache, analyze with OpenAI
+                    analysis = self.ai_analyzer.analyze_news(article)
+                    self.ai_analysis_cache[article_id] = analysis
+                    self.analysis_cache_time[article_id] = now
                 
                 # Extract mentioned symbols
                 mentioned = self.news_monitor.extract_mentioned_symbols(
