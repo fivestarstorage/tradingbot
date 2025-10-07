@@ -4,6 +4,8 @@ Integrates with NewsAPI and other sources
 """
 import requests
 import time
+import os
+import json
 from datetime import datetime, timedelta
 import logging
 
@@ -27,6 +29,67 @@ class NewsMonitor:
         # Rate limiting
         self.last_api_call = None
         self.min_call_interval = 60  # Minimum 60 seconds between API calls
+        
+        # DAILY LIMIT TRACKING (NewsAPI free tier = 100/day)
+        self.daily_limit = 100
+        self.calls_today = 0
+        self.calls_reset_date = None
+        self._load_daily_stats()
+    
+    def _load_daily_stats(self):
+        """Load daily API call stats from file"""
+        try:
+            import json
+            if os.path.exists('newsapi_stats.json'):
+                with open('newsapi_stats.json', 'r') as f:
+                    stats = json.load(f)
+                    self.calls_today = stats.get('calls_today', 0)
+                    reset_date_str = stats.get('reset_date')
+                    if reset_date_str:
+                        self.calls_reset_date = datetime.fromisoformat(reset_date_str).date()
+        except Exception as e:
+            logger.error(f"Error loading stats: {e}")
+            self.calls_today = 0
+            self.calls_reset_date = None
+    
+    def _save_daily_stats(self):
+        """Save daily API call stats to file"""
+        try:
+            import json
+            stats = {
+                'calls_today': self.calls_today,
+                'reset_date': datetime.now().date().isoformat()
+            }
+            with open('newsapi_stats.json', 'w') as f:
+                json.dump(stats, f)
+        except Exception as e:
+            logger.error(f"Error saving stats: {e}")
+    
+    def _check_daily_limit(self):
+        """Check and reset daily call counter"""
+        today = datetime.now().date()
+        
+        # Reset counter if it's a new day
+        if self.calls_reset_date is None or today > self.calls_reset_date:
+            self.calls_today = 0
+            self.calls_reset_date = today
+            self._save_daily_stats()
+            logger.info(f"📅 New day! Reset API call counter (Limit: {self.daily_limit}/day)")
+        
+        # Check if we've hit the limit
+        if self.calls_today >= self.daily_limit:
+            logger.warning(f"⚠️ Daily limit reached! ({self.calls_today}/{self.daily_limit} calls used)")
+            logger.info(f"📰 Using FREE CoinDesk RSS feed instead...")
+            return False
+        
+        return True
+    
+    def _increment_call_counter(self):
+        """Increment the daily call counter"""
+        self.calls_today += 1
+        self._save_daily_stats()
+        remaining = self.daily_limit - self.calls_today
+        logger.info(f"📊 API calls today: {self.calls_today}/{self.daily_limit} (⏳ {remaining} remaining)")
     
     def fetch_crypto_news(self, symbols=['BTC', 'ETH', 'crypto', 'bitcoin', 'ethereum'], hours_back=1):
         """
@@ -49,6 +112,11 @@ class NewsMonitor:
             if time_since_cache < self.cache_duration:
                 logger.info(f"📦 Using cached articles ({len(self.cached_articles)} articles, {int(self.cache_duration - time_since_cache)}s until refresh)")
                 return self.cached_articles
+        
+        # CHECK DAILY LIMIT
+        if not self._check_daily_limit():
+            # Hit daily limit - use free alternative
+            return self.fetch_coindesk_news()
         
         # RATE LIMITING - wait if called too recently
         if self.last_api_call:
@@ -107,8 +175,9 @@ class NewsMonitor:
             
             logger.info(f"Fetched {len(articles)} crypto-specific articles")
             
-            # Update rate limiting tracker
+            # Update rate limiting tracker and increment counter
             self.last_api_call = datetime.now()
+            self._increment_call_counter()
             
             # If we got very few articles, expand to general tech/business news
             if len(articles) < 5:
@@ -149,9 +218,14 @@ class NewsMonitor:
         """
         Fetch general tech and business news
         AI will filter for crypto/blockchain relevance
-        (WITH RATE LIMITING)
+        (WITH RATE LIMITING AND DAILY LIMIT)
         """
         if not self.newsapi_key:
+            return []
+        
+        # CHECK DAILY LIMIT
+        if not self._check_daily_limit():
+            logger.info(f"⏳ Daily limit reached, skipping tech news fetch")
             return []
         
         # RATE LIMITING - avoid double API calls
@@ -207,6 +281,7 @@ class NewsMonitor:
                 })
             
             logger.info(f"Fetched {len(articles)} tech news articles")
+            self._increment_call_counter()
             return articles
         
         except Exception as e:
