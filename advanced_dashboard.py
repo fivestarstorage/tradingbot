@@ -22,6 +22,7 @@ app = Flask(__name__)
 class BotManager:
     def __init__(self):
         self.bots_file = 'active_bots.json'
+        self.pids_file = 'bot_pids.json'
         self.client = BinanceClient(
             api_key=Config.BINANCE_API_KEY,
             api_secret=Config.BINANCE_API_SECRET,
@@ -116,6 +117,83 @@ class BotManager:
             pass
         
         return trades[-limit:]
+    
+    def get_pids(self):
+        """Load bot PIDs from file"""
+        if not os.path.exists(self.pids_file):
+            return {}
+        
+        try:
+            with open(self.pids_file, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    
+    def save_pids(self, pids):
+        """Save bot PIDs to file"""
+        with open(self.pids_file, 'w') as f:
+            json.dump(pids, f, indent=2)
+    
+    def start_bot(self, bot_id):
+        """Actually start a bot trading process"""
+        bots = self.get_bots()
+        bot = None
+        
+        for b in bots:
+            if b['id'] == bot_id:
+                bot = b
+                break
+        
+        if not bot:
+            return False, "Bot not found"
+        
+        if bot['status'] == 'running':
+            return False, "Bot is already running"
+        
+        try:
+            # Start the bot process in background using screen
+            cmd = f"screen -dmS bot_{bot_id} python3 integrated_trader.py {bot_id} '{bot['name']}' {bot['symbol']} {bot['strategy']} {bot['trade_amount']}"
+            
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                # Update bot status
+                self.update_bot(bot_id, {'status': 'running'})
+                return True, f"✅ Bot '{bot['name']}' started successfully!"
+            else:
+                return False, f"Failed to start bot: {result.stderr}"
+        
+        except Exception as e:
+            return False, f"Error starting bot: {str(e)}"
+    
+    def stop_bot(self, bot_id):
+        """Stop a bot trading process"""
+        bots = self.get_bots()
+        bot = None
+        
+        for b in bots:
+            if b['id'] == bot_id:
+                bot = b
+                break
+        
+        if not bot:
+            return False, "Bot not found"
+        
+        if bot['status'] == 'stopped':
+            return False, "Bot is already stopped"
+        
+        try:
+            # Kill the screen session
+            cmd = f"screen -X -S bot_{bot_id} quit"
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            
+            # Update bot status
+            self.update_bot(bot_id, {'status': 'stopped'})
+            
+            return True, f"🛑 Bot '{bot['name']}' stopped successfully!"
+        
+        except Exception as e:
+            return False, f"Error stopping bot: {str(e)}"
 
 manager = BotManager()
 
@@ -184,19 +262,19 @@ def delete_bot(bot_id):
 
 @app.route('/api/bot/<int:bot_id>/start', methods=['POST'])
 def start_bot(bot_id):
-    """Start a bot (simulated for now)"""
+    """Start a bot - actually spawns the trading process"""
     try:
-        manager.update_bot(bot_id, {'status': 'running'})
-        return jsonify({'success': True, 'message': 'Bot started'})
+        success, message = manager.start_bot(bot_id)
+        return jsonify({'success': success, 'message': message})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/bot/<int:bot_id>/stop', methods=['POST'])
 def stop_bot(bot_id):
-    """Stop a bot (simulated for now)"""
+    """Stop a bot - kills the trading process"""
     try:
-        manager.update_bot(bot_id, {'status': 'stopped'})
-        return jsonify({'success': True, 'message': 'Bot stopped'})
+        success, message = manager.stop_bot(bot_id)
+        return jsonify({'success': success, 'message': message})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
@@ -818,30 +896,31 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         
         // Start/Stop bot
         function startBot(botId) {
-            if (!confirm('Start this bot?')) return;
+            if (!confirm('Start this bot?\n\nThis will begin LIVE TRADING with real orders!')) return;
             
             fetch(`/api/bot/${botId}/start`, {method: 'POST'})
                 .then(response => response.json())
                 .then(result => {
                     if (result.success) {
                         updateDashboard();
-                        alert('Bot started! (Note: This is a simulation. Implement actual bot start logic.)');
+                        alert(result.message + '\n\nBot is now trading live! Check logs with:\nscreen -r bot_' + botId);
                     } else {
-                        alert('Error: ' + result.error);
+                        alert('Error: ' + (result.error || result.message));
                     }
                 });
         }
         
         function stopBot(botId) {
-            if (!confirm('Stop this bot?')) return;
+            if (!confirm('Stop this bot?\n\nThis will halt all trading immediately.')) return;
             
             fetch(`/api/bot/${botId}/stop`, {method: 'POST'})
                 .then(response => response.json())
                 .then(result => {
                     if (result.success) {
                         updateDashboard();
+                        alert(result.message);
                     } else {
-                        alert('Error: ' + result.error);
+                        alert('Error: ' + (result.error || result.message));
                     }
                 });
         }
