@@ -141,18 +141,18 @@ class NewsMonitor:
             return []
         
         try:
-            # Use the correct CryptoNews API endpoint
-            # According to docs: https://cryptonews-api.com/documentation
-            # Endpoint: /api/v1/category?section=general&items=50&page=1&token=XXX
+            # Use the simple CryptoNews API endpoint
+            # Endpoint: /api/v1?tickers=BTC,ETH,XRP&items=50&page=1&token=XXX
+            # Focus on major coins only: BTC, ETH, XRP
             params = {
-                'section': 'general',  # General crypto news
+                'tickers': 'BTC,ETH,XRP',  # Only track these 3 major coins
                 'items': items,
                 'page': 1,
-                'token': self.cryptonews_key  # Use 'token' not 'auth_token'
+                'token': self.cryptonews_key
             }
             
-            # Use /category endpoint
-            response = requests.get(f"{self.cryptonews_url}/category", params=params, timeout=15)
+            # Use base /api/v1 endpoint with tickers filter
+            response = requests.get(self.cryptonews_url, params=params, timeout=15)
             response.raise_for_status()
             
             data = response.json()
