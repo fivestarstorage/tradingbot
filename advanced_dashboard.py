@@ -1861,7 +1861,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
         
         function pullUpdates() {
-            if (!confirm('Pull latest changes from git?\n\nThis will update your code to the latest version.')) {
+            if (!confirm(`Pull latest changes from git?
+
+This will update your code to the latest version.`)) {
                 return;
             }
             
@@ -1877,11 +1879,16 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
         
         function restartDashboard() {
-            alert('To restart the dashboard, run on your server:\n\nscreen -S dashboard -X quit\nscreen -dmS dashboard python3 advanced_dashboard.py');
+            alert(`To restart the dashboard, run on your server:
+
+screen -S dashboard -X quit
+screen -dmS dashboard python3 advanced_dashboard.py`);
         }
         
         function viewUpdateLog() {
-            alert('To view update log, run on your server:\n\ntail -f /root/tradingbot/auto_update.log');
+            alert(`To view update log, run on your server:
+
+tail -f /root/tradingbot/auto_update.log`);
         }
         
         // Update dashboard
