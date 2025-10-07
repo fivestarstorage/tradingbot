@@ -73,6 +73,10 @@ class BotRunner:
         
         self.strategy = strategy_class()
         
+        # Pass Binance client to strategy for dynamic symbol validation
+        if hasattr(self.strategy, 'set_binance_client'):
+            self.strategy.set_binance_client(self.client)
+        
         # Store symbol in strategy for AI strategies
         if hasattr(self.strategy, 'set_symbol'):
             self.strategy.set_symbol(self.symbol)

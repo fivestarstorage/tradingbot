@@ -14,9 +14,14 @@ logger = logging.getLogger(__name__)
 class NewsMonitor:
     """Monitors crypto news from multiple sources"""
     
-    def __init__(self, newsapi_key=None):
+    def __init__(self, newsapi_key=None, cryptonews_key=None):
+        # Legacy NewsAPI (kept for fallback)
         self.newsapi_key = newsapi_key
         self.newsapi_url = "https://newsapi.org/v2/everything"
+        
+        # NEW: CryptoNews API (UNLIMITED crypto news!)
+        self.cryptonews_key = cryptonews_key or os.getenv('CRYPTONEWS_API_KEY')
+        self.cryptonews_url = "https://cryptonews-api.com/api/v1"
         
         # Track seen articles to avoid duplicates
         self.seen_articles = set()
@@ -30,7 +35,7 @@ class NewsMonitor:
         self.last_api_call = None
         self.min_call_interval = 60  # Minimum 60 seconds between API calls
         
-        # DAILY LIMIT TRACKING (NewsAPI free tier = 100/day)
+        # DAILY LIMIT TRACKING (only for NewsAPI fallback)
         self.daily_limit = 100
         self.calls_today = 0
         self.calls_reset_date = None
@@ -91,21 +96,84 @@ class NewsMonitor:
         remaining = self.daily_limit - self.calls_today
         logger.info(f"📊 API calls today: {self.calls_today}/{self.daily_limit} (⏳ {remaining} remaining)")
     
+    def fetch_cryptonews_api(self, items=50):
+        """
+        Fetch crypto news from CryptoNews API (PRIMARY SOURCE)
+        NO rate limits! Much better crypto coverage!
+        """
+        if not self.cryptonews_key:
+            logger.warning("No CryptoNews API key provided, falling back to other sources")
+            return []
+        
+        try:
+            # Use the /news endpoint for latest crypto news
+            params = {
+                'tickers': 'BTC,ETH,SOL,XRP,ADA,DOGE,MATIC,AVAX,DOT,LINK',  # Focus on major coins
+                'items': items,
+                'token': self.cryptonews_key
+            }
+            
+            response = requests.get(f"{self.cryptonews_url}/news", params=params, timeout=15)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            if data.get('status') != 'success':
+                logger.error(f"CryptoNews API error: {data.get('message', 'Unknown error')}")
+                return []
+            
+            articles = []
+            news_data = data.get('data', [])
+            
+            for article in news_data:
+                article_id = f"cryptonews_{article.get('news_url', '')}"
+                
+                if article_id in self.seen_articles:
+                    continue
+                
+                self.seen_articles.add(article_id)
+                
+                # Parse date
+                date_str = article.get('date', '')
+                try:
+                    timestamp = datetime.strptime(date_str, '%a, %d %b %Y %H:%M:%S %z') if date_str else datetime.now()
+                except:
+                    timestamp = datetime.now()
+                
+                articles.append({
+                    'id': article_id,
+                    'title': article.get('title', ''),
+                    'description': article.get('text', '')[:500],  # First 500 chars
+                    'content': article.get('text', ''),
+                    'source': article.get('source_name', 'CryptoNews'),
+                    'url': article.get('news_url', ''),
+                    'published_at': date_str,
+                    'timestamp': timestamp,
+                    'tickers': article.get('tickers', []),  # Mentioned coins!
+                    'sentiment': article.get('sentiment', 'Neutral')
+                })
+            
+            logger.info(f"📰 Fetched {len(articles)} articles from CryptoNews API")
+            return articles
+        
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error fetching from CryptoNews API: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Unexpected error with CryptoNews API: {e}")
+            return []
+    
     def fetch_crypto_news(self, symbols=['BTC', 'ETH', 'crypto', 'bitcoin', 'ethereum'], hours_back=1):
         """
-        Fetch recent crypto news (WITH CACHING to avoid rate limits)
+        Fetch recent crypto news (PRIMARY: CryptoNews API, FALLBACK: others)
         
         Args:
-            symbols: List of keywords to search for
+            symbols: List of keywords to search for (used for fallback sources)
             hours_back: How many hours of news to fetch
             
         Returns:
             List of news articles with metadata
         """
-        if not self.newsapi_key:
-            logger.warning("No NewsAPI key provided")
-            return []
-        
         # CHECK CACHE FIRST
         if self.cache_time and self.cached_articles:
             time_since_cache = (datetime.now() - self.cache_time).total_seconds()
@@ -113,10 +181,31 @@ class NewsMonitor:
                 logger.info(f"📦 Using cached articles ({len(self.cached_articles)} articles, {int(self.cache_duration - time_since_cache)}s until refresh)")
                 return self.cached_articles
         
+        # PRIORITY 1: Try CryptoNews API (UNLIMITED, best crypto coverage)
+        if self.cryptonews_key:
+            articles = self.fetch_cryptonews_api(items=50)
+            if articles:
+                self.cached_articles = articles
+                self.cache_time = datetime.now()
+                logger.info(f"💾 Cached {len(articles)} CryptoNews articles")
+                return articles
+        
+        # PRIORITY 2: Try CoinDesk RSS (FREE, no limits)
+        articles = self.fetch_coindesk_news()
+        if articles:
+            self.cached_articles = articles
+            self.cache_time = datetime.now()
+            return articles
+        
+        # PRIORITY 3: Fall back to NewsAPI (rate limited)
+        if not self.newsapi_key:
+            logger.warning("No news sources available!")
+            return []
+        
         # CHECK DAILY LIMIT
         if not self._check_daily_limit():
-            # Hit daily limit - use free alternative
-            return self.fetch_coindesk_news()
+            logger.warning("All news sources exhausted or rate limited")
+            return []
         
         # RATE LIMITING - wait if called too recently
         if self.last_api_call:

@@ -222,3 +222,56 @@ class BinanceClient:
         except BinanceAPIException as e:
             logger.error(f"Error cancelling order: {e}")
             return None
+    
+    def is_symbol_tradeable(self, symbol):
+        """
+        Check if a trading symbol is available and tradeable on Binance
+        
+        Args:
+            symbol: Trading pair symbol (e.g., 'BTCUSDT')
+            
+        Returns:
+            Boolean: True if tradeable, False otherwise
+        """
+        try:
+            info = self.client.get_symbol_info(symbol)
+            if info and info.get('status') == 'TRADING':
+                logger.info(f"✅ {symbol} is tradeable on Binance")
+                return True
+            else:
+                logger.warning(f"⚠️ {symbol} exists but is not actively trading (status: {info.get('status')})")
+                return False
+        except BinanceAPIException as e:
+            logger.warning(f"❌ {symbol} not available on Binance: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Error checking symbol {symbol}: {e}")
+            return False
+    
+    def search_binance_symbols(self, coin_name):
+        """
+        Search for all USDT trading pairs for a coin
+        
+        Args:
+            coin_name: Coin symbol (e.g., 'BTC', 'ETH', 'PEPE')
+            
+        Returns:
+            List of valid USDT trading pairs
+        """
+        try:
+            # Common variations
+            possible_symbols = [
+                f"{coin_name.upper()}USDT",
+                f"{coin_name.upper()}BUSD",
+                f"{coin_name.upper()}USD"
+            ]
+            
+            valid_symbols = []
+            for symbol in possible_symbols:
+                if self.is_symbol_tradeable(symbol):
+                    valid_symbols.append(symbol)
+            
+            return valid_symbols
+        except Exception as e:
+            logger.error(f"Error searching for {coin_name}: {e}")
+            return []

@@ -43,53 +43,12 @@ class AIAutonomousStrategy:
         self.min_confidence = 80  # Higher threshold for autonomous trading
         self.max_articles_per_cycle = 20  # Analyze MORE news articles
         
-        # Supported trading pairs on Binance (EXPANDED!)
-        self.supported_symbols = [
-            # Top Market Cap (Layer 1s)
-            'BTCUSDT',    # Bitcoin
-            'ETHUSDT',    # Ethereum
-            'BNBUSDT',    # Binance Coin
-            'SOLUSDT',    # Solana
-            'XRPUSDT',    # Ripple
-            'ADAUSDT',    # Cardano
-            'AVAXUSDT',   # Avalanche
-            'DOTUSDT',    # Polkadot
-            'TRXUSDT',    # Tron
-            'TONUSDT',    # TON (Telegram)
-            'NEARUSDT',   # NEAR Protocol
-            'ATOMUSDT',   # Cosmos
-            'SUIUSDT',    # Sui
-            'APTUSDT',    # Aptos
-            'ICPUSDT',    # Internet Computer
-            'FILUSDT',    # Filecoin
-            'VETUSDT',    # VeChain
-            'ALGOUSDT',   # Algorand
-            'HBARUSDT',   # Hedera
-            'STXUSDT',    # Stacks
-            'INJUSDT',    # Injective
-            
-            # Layer 2s & Scaling
-            'MATICUSDT',  # Polygon
-            'ARBUSDT',    # Arbitrum
-            'OPUSDT',     # Optimism
-            
-            # DeFi
-            'LINKUSDT',   # Chainlink
-            'UNIUSDT',    # Uniswap
-            'AAVEUSDT',   # Aave
-            'MKRUSDT',    # Maker
-            'LDOUSDT',    # Lido DAO
-            'RNDRUSDT',   # Render
-            
-            # Popular/Memecoins
-            'DOGEUSDT',   # Dogecoin
-            'SHIBUSDT',   # Shiba Inu
-            'PEPEUSDT',   # Pepe
-            
-            # Others
-            'LTCUSDT',    # Litecoin
-            'ETCUSDT',    # Ethereum Classic
-        ]
+        # NO MORE HARDCODED LIST! 
+        # We now dynamically check if coins are tradeable on Binance!
+        self.binance_client = None  # Will be set by the trader
+        
+        # Cache of validated symbols to avoid repeated Binance API calls
+        self.validated_symbols_cache = {}  # {symbol: is_tradeable}
         
         # Position Management
         self.current_position = None  # Which coin we're holding
@@ -108,6 +67,35 @@ class AIAutonomousStrategy:
         
         # Last decision
         self.last_decision = None
+    
+    def set_binance_client(self, client):
+        """Set the Binance client for dynamic symbol validation"""
+        self.binance_client = client
+        logger.info("✅ Binance client connected - can now validate ANY coin dynamically!")
+    
+    def is_symbol_valid(self, symbol):
+        """
+        Check if a symbol is tradeable on Binance (with caching)
+        
+        Args:
+            symbol: Trading pair like 'BTCUSDT'
+            
+        Returns:
+            Boolean: True if tradeable on Binance
+        """
+        # Check cache first
+        if symbol in self.validated_symbols_cache:
+            return self.validated_symbols_cache[symbol]
+        
+        # Validate with Binance
+        if self.binance_client:
+            is_valid = self.binance_client.is_symbol_tradeable(symbol)
+            self.validated_symbols_cache[symbol] = is_valid
+            return is_valid
+        
+        # Fallback: assume USDT pairs are valid
+        logger.warning("No Binance client available, assuming symbol is valid")
+        return symbol.endswith('USDT')
     
     def analyze(self, klines):
         """Wrapper for compatibility with live trader"""
@@ -318,8 +306,13 @@ class AIAutonomousStrategy:
                 # Use AI-provided symbols or extracted ones
                 symbols_to_consider = analysis.get('symbols', mentioned) or mentioned
                 
-                # Filter to supported symbols
-                valid_symbols = [s for s in symbols_to_consider if s in self.supported_symbols]
+                # DYNAMIC VALIDATION: Check if each symbol is tradeable on Binance
+                valid_symbols = []
+                for sym in symbols_to_consider:
+                    if self.is_symbol_valid(sym):
+                        valid_symbols.append(sym)
+                    else:
+                        logger.info(f"  ❌ {sym} not tradeable on Binance, skipping")
                 
                 if valid_symbols and analysis['signal'] in ['BUY', 'SELL']:
                     for sym in valid_symbols:
