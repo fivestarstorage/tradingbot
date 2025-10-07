@@ -3,9 +3,15 @@ Integrated Live Trader - Called by Dashboard
 Runs a single bot with specified parameters
 """
 import sys
+import os
 import time
 import logging
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
 from binance_client import BinanceClient
 from config import Config
 from twilio_notifier import TwilioNotifier
@@ -78,10 +84,12 @@ class BotRunner:
         self.sms_notifier = TwilioNotifier()
     
     def get_data(self, limit=100):
-        """Fetch recent klines"""
+        """Fetch recent klines and convert to DataFrame"""
+        import pandas as pd
+        
         klines = self.client.get_klines(self.symbol, interval='5m', limit=limit)
         if not klines:
-            return []
+            return pd.DataFrame()
         
         data = []
         for k in klines:
@@ -93,7 +101,10 @@ class BotRunner:
                 'close': float(k[4]),
                 'volume': float(k[5])
             })
-        return data
+        
+        # Convert to DataFrame for compatibility with all strategies
+        df = pd.DataFrame(data)
+        return df
     
     def execute_trade(self, signal, current_price):
         """Execute buy/sell orders"""
@@ -195,12 +206,12 @@ class BotRunner:
             try:
                 # Get market data
                 data = self.get_data(limit=100)
-                if not data:
+                if data.empty:
                     self.logger.warning("No data received, retrying...")
                     time.sleep(60)
                     continue
                 
-                current_price = data[-1]['close']
+                current_price = data.iloc[-1]['close']
                 
                 # Get signal
                 signal_data = self.strategy.generate_signal(data)

@@ -30,15 +30,44 @@ class BotManager:
         )
     
     def get_bots(self):
-        """Load all active bots from file"""
+        """Load all active bots from file and check real status"""
         if not os.path.exists(self.bots_file):
             return []
         
         try:
             with open(self.bots_file, 'r') as f:
-                return json.load(f)
+                bots = json.load(f)
+            
+            # Check actual screen session status
+            for bot in bots:
+                actual_status = self._check_bot_running(bot['id'])
+                if actual_status != bot['status']:
+                    # Update status to match reality
+                    bot['status'] = actual_status
+            
+            # Save corrected statuses
+            self.save_bots(bots)
+            
+            return bots
         except:
             return []
+    
+    def _check_bot_running(self, bot_id):
+        """Check if bot screen session actually exists"""
+        try:
+            result = subprocess.run(
+                ['screen', '-ls'],
+                capture_output=True,
+                text=True
+            )
+            
+            # Check if bot_X appears in screen list
+            if f'bot_{bot_id}' in result.stdout:
+                return 'running'
+            else:
+                return 'stopped'
+        except:
+            return 'stopped'
     
     def save_bots(self, bots):
         """Save bots to file"""
@@ -794,7 +823,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div class="section">
             <div class="section-header">
                 <h2>🤖 Trading Bots</h2>
-                <button class="btn" onclick="showAddBotModal()">➕ Add New Bot</button>
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn btn-sm" onclick="updateDashboard()" title="Refresh status from actual screen sessions">🔄 Refresh Status</button>
+                    <button class="btn" onclick="showAddBotModal()">➕ Add New Bot</button>
+                </div>
             </div>
             
             <div class="bots-grid" id="bots-grid">
@@ -998,7 +1030,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <div class="bot-card">
                     <div class="bot-header">
                         <div class="bot-title">${bot.name}</div>
-                        <div class="bot-status ${bot.status}">${bot.status.toUpperCase()}</div>
+                        <div class="bot-status ${bot.status}" title="Verified against screen sessions">
+                            ${bot.status.toUpperCase()} ✓
+                        </div>
                     </div>
                     
                     <div class="bot-info">

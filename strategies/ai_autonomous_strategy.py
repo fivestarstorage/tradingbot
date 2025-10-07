@@ -28,6 +28,14 @@ class AIAutonomousStrategy:
     
     def __init__(self, newsapi_key=None, openai_key=None):
         self.name = "AI Autonomous Trading"
+        
+        # Load from environment if not provided
+        import os
+        if newsapi_key is None:
+            newsapi_key = os.getenv('NEWSAPI_KEY')
+        if openai_key is None:
+            openai_key = os.getenv('OPENAI_API_KEY')
+        
         self.news_monitor = NewsMonitor(newsapi_key=newsapi_key)
         self.ai_analyzer = AINewsAnalyzer(api_key=openai_key)
         
