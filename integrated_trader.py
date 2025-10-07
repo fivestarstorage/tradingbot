@@ -96,12 +96,62 @@ class BotRunner:
         klines = self.client.get_klines(self.symbol, interval='5m', limit=limit)
         return klines if klines else []
     
+    def format_quantity(self, symbol, quantity):
+        """
+        Format quantity to match Binance precision rules
+        
+        Args:
+            symbol: Trading pair (e.g., BTCUSDT)
+            quantity: Raw quantity value
+            
+        Returns:
+            Properly formatted quantity string
+        """
+        try:
+            # Get symbol info to find precision
+            symbol_info = self.client.get_symbol_info(symbol)
+            
+            if not symbol_info:
+                # Default to 6 decimal places if can't get info
+                return float(f"{quantity:.6f}")
+            
+            # Find LOT_SIZE filter
+            for filter_item in symbol_info['filters']:
+                if filter_item['filterType'] == 'LOT_SIZE':
+                    step_size = float(filter_item['stepSize'])
+                    
+                    # Calculate precision from step_size
+                    # e.g., 0.00001 -> 5 decimal places
+                    precision = 0
+                    if step_size < 1:
+                        precision = len(str(step_size).rstrip('0').split('.')[1])
+                    
+                    # Round quantity to the correct precision
+                    formatted = round(quantity, precision)
+                    
+                    # Remove trailing zeros
+                    if precision > 0:
+                        formatted = float(f"{formatted:.{precision}f}")
+                    
+                    self.logger.info(f"Formatted quantity: {quantity} -> {formatted} (precision: {precision})")
+                    return formatted
+            
+            # If no LOT_SIZE filter found, use 6 decimals
+            return float(f"{quantity:.6f}")
+            
+        except Exception as e:
+            self.logger.error(f"Error formatting quantity: {e}, using 6 decimals")
+            return float(f"{quantity:.6f}")
+    
     def execute_trade(self, signal, current_price, signal_data=None):
         """Execute buy/sell orders"""
         try:
             if signal == 'BUY' and not self.position:
                 # Calculate quantity
-                quantity = self.trade_amount / current_price
+                raw_quantity = self.trade_amount / current_price
+                
+                # Format quantity to match Binance precision rules
+                quantity = self.format_quantity(self.symbol, raw_quantity)
                 
                 # Place order
                 order = self.client.place_market_order(
@@ -149,7 +199,10 @@ class BotRunner:
                 # Get current balance
                 balance = self.client.get_account_balance(self.symbol.replace('USDT', ''))
                 if balance and balance['free'] > 0:
-                    quantity = balance['free']
+                    raw_quantity = balance['free']
+                    
+                    # Format quantity to match Binance precision rules
+                    quantity = self.format_quantity(self.symbol, raw_quantity)
                     
                     # Place order
                     order = self.client.place_market_order(
