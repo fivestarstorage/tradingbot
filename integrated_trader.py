@@ -94,6 +94,9 @@ class BotRunner:
         # Position persistence file
         self.position_file = f'bot_{self.bot_id}_position.json'
         self._load_position()
+        
+        # Check for orphaned coins in wallet
+        self._check_orphaned_positions()
     
     def _load_position(self):
         """Load saved position from file (if exists)"""
@@ -142,6 +145,57 @@ class BotRunner:
                 self.logger.info("🗑️ Cleared position file")
         except Exception as e:
             self.logger.error(f"Error deleting position file: {e}")
+    
+    def _check_orphaned_positions(self):
+        """Check if we have coins in wallet that bot doesn't know about"""
+        if self.position:
+            # Already have a tracked position
+            return
+        
+        try:
+            # Check what coins we have
+            coin = self.symbol.replace('USDT', '')
+            balance = self.client.get_account_balance(coin)
+            
+            if balance:
+                amount = float(balance.get('free', 0))
+                if amount > 0:
+                    # We have coins but no tracked position!
+                    self.logger.warning("=" * 70)
+                    self.logger.warning(f"⚠️  ORPHANED POSITION DETECTED")
+                    self.logger.warning("=" * 70)
+                    self.logger.warning(f"Found {amount:.6f} {coin} in wallet")
+                    self.logger.warning(f"But no position file exists for this bot")
+                    self.logger.warning("")
+                    self.logger.warning("🤖 Bot will now monitor this position")
+                    self.logger.warning(f"   Will sell when:")
+                    self.logger.warning(f"   • AI signals SELL")
+                    self.logger.warning(f"   • Price drops significantly")
+                    self.logger.warning("=" * 70)
+                    
+                    # Get current price
+                    data = self.get_data(limit=10)
+                    if data and len(data) > 0:
+                        current_price = float(data[-1][4])
+                        
+                        # Set position (we don't know entry price, so use current - 3%)
+                        self.position = 'LONG'
+                        self.entry_price = current_price * 0.97  # Assume we're slightly in profit
+                        self.stop_loss = current_price * 0.92  # 8% stop loss (wider since we don't know entry)
+                        self.take_profit = current_price * 1.05  # 5% take profit
+                        
+                        self.logger.info(f"📍 Tracking orphaned position:")
+                        self.logger.info(f"   Current Price: ${current_price:.2f}")
+                        self.logger.info(f"   Assumed Entry: ${self.entry_price:.2f} (est)")
+                        self.logger.info(f"   Stop Loss: ${self.stop_loss:.2f}")
+                        self.logger.info(f"   Take Profit: ${self.take_profit:.2f}")
+                        
+                        # Save this tracked position
+                        self._save_position()
+        
+        except Exception as e:
+            # Silently fail - this is just a nice-to-have feature
+            pass
     
     def get_data(self, limit=100):
         """Fetch recent klines - return raw format for strategy.analyze()"""
@@ -210,14 +264,33 @@ class BotRunner:
         try:
             if signal == 'BUY' and not self.position:
                 # Check USDT balance first
-                usdt_balance = self.client.get_account_balance('USDT')
-                available_usdt = float(usdt_balance['free']) if usdt_balance else 0
+                try:
+                    usdt_balance = self.client.get_account_balance('USDT')
+                    available_usdt = float(usdt_balance['free']) if usdt_balance else 0
+                except Exception as e:
+                    self.logger.error(f"Error checking balance: {e}")
+                    available_usdt = 0
                 
-                if available_usdt < self.trade_amount:
-                    self.logger.error(f"❌ Insufficient USDT balance!")
-                    self.logger.error(f"   Required: ${self.trade_amount:.2f}")
-                    self.logger.error(f"   Available: ${available_usdt:.2f}")
-                    self.logger.error(f"   Shortfall: ${self.trade_amount - available_usdt:.2f}")
+                # Need at least trade_amount + 1% for fees
+                required_balance = self.trade_amount * 1.01
+                
+                if available_usdt < required_balance:
+                    self.logger.warning("=" * 70)
+                    self.logger.warning("⚠️  INSUFFICIENT USDT BALANCE - CANNOT TRADE")
+                    self.logger.warning("=" * 70)
+                    self.logger.warning(f"Required: ${required_balance:.2f} (includes 1% for fees)")
+                    self.logger.warning(f"Available: ${available_usdt:.2f}")
+                    self.logger.warning(f"Shortfall: ${required_balance - available_usdt:.2f}")
+                    self.logger.warning("")
+                    self.logger.warning("💡 Solutions:")
+                    self.logger.warning("   1. Add more USDT to your Binance account")
+                    self.logger.warning("   2. Reduce bot trade amount")
+                    self.logger.warning("   3. Sell existing coins to free up USDT")
+                    self.logger.warning("=" * 70)
+                    
+                    # STOP checking for buy signals for 5 minutes
+                    import time
+                    time.sleep(300)  # Sleep for 5 minutes to avoid spam
                     return False
                 
                 # Calculate quantity
