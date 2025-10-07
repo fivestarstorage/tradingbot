@@ -59,3 +59,4 @@ class Config:
         print(f"Take Profit: {cls.TAKE_PROFIT_PERCENT}%")
         print(f"API Key: {'*' * 10}{cls.BINANCE_API_KEY[-4:] if cls.BINANCE_API_KEY else 'NOT SET'}")
         print("================================\n")
+

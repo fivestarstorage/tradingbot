@@ -1,0 +1,926 @@
+"""
+Advanced Trading Management Dashboard
+
+Full-featured dashboard to manage multiple trading bots:
+- View all bots and their performance
+- Start/stop/edit bots
+- Adjust trade amounts
+- View balance and withdraw
+- Add new strategies
+"""
+from flask import Flask, render_template, jsonify, request
+import json
+import os
+import signal
+import subprocess
+from datetime import datetime
+from binance_client import BinanceClient
+from config import Config
+
+app = Flask(__name__)
+
+class BotManager:
+    def __init__(self):
+        self.bots_file = 'active_bots.json'
+        self.client = BinanceClient(
+            api_key=Config.BINANCE_API_KEY,
+            api_secret=Config.BINANCE_API_SECRET,
+            testnet=Config.USE_TESTNET
+        )
+    
+    def get_bots(self):
+        """Load all active bots from file"""
+        if not os.path.exists(self.bots_file):
+            return []
+        
+        try:
+            with open(self.bots_file, 'r') as f:
+                return json.load(f)
+        except:
+            return []
+    
+    def save_bots(self, bots):
+        """Save bots to file"""
+        with open(self.bots_file, 'w') as f:
+            json.dump(bots, f, indent=2)
+    
+    def add_bot(self, name, symbol, strategy, trade_amount):
+        """Add a new bot"""
+        bots = self.get_bots()
+        
+        new_bot = {
+            'id': len(bots) + 1,
+            'name': name,
+            'symbol': symbol,
+            'strategy': strategy,
+            'trade_amount': trade_amount,
+            'status': 'stopped',
+            'created': datetime.now().isoformat(),
+            'trades': 0,
+            'profit': 0.0
+        }
+        
+        bots.append(new_bot)
+        self.save_bots(bots)
+        return new_bot
+    
+    def update_bot(self, bot_id, updates):
+        """Update bot settings"""
+        bots = self.get_bots()
+        
+        for bot in bots:
+            if bot['id'] == bot_id:
+                bot.update(updates)
+                break
+        
+        self.save_bots(bots)
+    
+    def delete_bot(self, bot_id):
+        """Delete a bot"""
+        bots = self.get_bots()
+        bots = [b for b in bots if b['id'] != bot_id]
+        self.save_bots(bots)
+    
+    def get_account_info(self):
+        """Get current account balance"""
+        balance = self.client.get_account_balance('USDT')
+        
+        return {
+            'available': balance['free'] if balance else 0,
+            'locked': balance['locked'] if balance else 0,
+            'total': (balance['free'] + balance['locked']) if balance else 0,
+            'mode': 'TESTNET' if Config.USE_TESTNET else 'MAINNET'
+        }
+    
+    def get_recent_trades(self, limit=20):
+        """Get recent trades from log files"""
+        today = datetime.now().strftime("%Y%m%d")
+        log_file = f'live_trading_{today}.log'
+        
+        trades = []
+        
+        if not os.path.exists(log_file):
+            return trades
+        
+        try:
+            with open(log_file, 'r') as f:
+                lines = f.readlines()
+            
+            for i, line in enumerate(lines):
+                if 'CLOSED POSITION' in line or 'OPENED POSITION' in line:
+                    trades.append({
+                        'time': line.split(' ')[0] + ' ' + line.split(' ')[1],
+                        'info': line.split(':', 2)[2].strip() if ':' in line else line
+                    })
+        except:
+            pass
+        
+        return trades[-limit:]
+
+manager = BotManager()
+
+# ==================== ROUTES ====================
+
+@app.route('/')
+def index():
+    """Main dashboard page"""
+    return render_template('advanced_dashboard.html')
+
+@app.route('/api/overview')
+def overview():
+    """Get account overview"""
+    try:
+        account = manager.get_account_info()
+        bots = manager.get_bots()
+        trades = manager.get_recent_trades(20)
+        
+        # Calculate total allocated
+        total_allocated = sum(bot['trade_amount'] for bot in bots if bot['status'] == 'running')
+        
+        return jsonify({
+            'success': True,
+            'account': account,
+            'bots': bots,
+            'trades': trades,
+            'total_allocated': total_allocated,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/bot/add', methods=['POST'])
+def add_bot():
+    """Add a new bot"""
+    try:
+        data = request.json
+        bot = manager.add_bot(
+            name=data['name'],
+            symbol=data['symbol'],
+            strategy=data['strategy'],
+            trade_amount=float(data['trade_amount'])
+        )
+        return jsonify({'success': True, 'bot': bot})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/bot/<int:bot_id>/update', methods=['POST'])
+def update_bot(bot_id):
+    """Update bot settings"""
+    try:
+        data = request.json
+        manager.update_bot(bot_id, data)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/bot/<int:bot_id>/delete', methods=['POST'])
+def delete_bot(bot_id):
+    """Delete a bot"""
+    try:
+        manager.delete_bot(bot_id)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/bot/<int:bot_id>/start', methods=['POST'])
+def start_bot(bot_id):
+    """Start a bot (simulated for now)"""
+    try:
+        manager.update_bot(bot_id, {'status': 'running'})
+        return jsonify({'success': True, 'message': 'Bot started'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/bot/<int:bot_id>/stop', methods=['POST'])
+def stop_bot(bot_id):
+    """Stop a bot (simulated for now)"""
+    try:
+        manager.update_bot(bot_id, {'status': 'stopped'})
+        return jsonify({'success': True, 'message': 'Bot stopped'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+# ==================== HTML TEMPLATE ====================
+
+HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Management Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0f;
+            color: #fff;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .header h1 {
+            font-size: 1.8em;
+        }
+        
+        .mode-badge {
+            padding: 8px 20px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 20px;
+            font-size: 0.9em;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 30px;
+        }
+        
+        .account-summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .summary-card {
+            background: #16161f;
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #2a2a3e;
+        }
+        
+        .summary-card h3 {
+            color: #888;
+            font-size: 0.85em;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+        
+        .summary-card .value {
+            font-size: 1.8em;
+            font-weight: bold;
+        }
+        
+        .section {
+            background: #16161f;
+            padding: 25px;
+            border-radius: 10px;
+            border: 1px solid #2a2a3e;
+            margin-bottom: 30px;
+        }
+        
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .section h2 {
+            font-size: 1.3em;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: all 0.2s;
+        }
+        
+        .btn:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+        }
+        
+        .btn-sm {
+            padding: 6px 12px;
+            font-size: 0.85em;
+        }
+        
+        .btn-success {
+            background: #4caf50;
+        }
+        
+        .btn-success:hover {
+            background: #45a049;
+        }
+        
+        .btn-danger {
+            background: #f44336;
+        }
+        
+        .btn-danger:hover {
+            background: #da190b;
+        }
+        
+        .btn-secondary {
+            background: #555;
+        }
+        
+        .btn-secondary:hover {
+            background: #666;
+        }
+        
+        .bots-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        
+        .bot-card {
+            background: #1a1a2e;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #2a2a3e;
+        }
+        
+        .bot-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 15px;
+        }
+        
+        .bot-title {
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+        
+        .bot-status {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+        
+        .bot-status.running {
+            background: #4caf5033;
+            color: #4caf50;
+        }
+        
+        .bot-status.stopped {
+            background: #f4433633;
+            color: #f44336;
+        }
+        
+        .bot-info {
+            margin-bottom: 15px;
+        }
+        
+        .bot-info div {
+            margin: 5px 0;
+            font-size: 0.9em;
+            color: #aaa;
+        }
+        
+        .bot-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .bot-stat {
+            text-align: center;
+            padding: 10px;
+            background: #0f0f1e;
+            border-radius: 5px;
+        }
+        
+        .bot-stat .label {
+            font-size: 0.75em;
+            color: #888;
+            margin-bottom: 5px;
+        }
+        
+        .bot-stat .value {
+            font-size: 1.1em;
+            font-weight: bold;
+        }
+        
+        .bot-controls {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .bot-controls button {
+            flex: 1;
+        }
+        
+        .trades-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .trade-item {
+            background: #1a1a2e;
+            padding: 12px;
+            margin-bottom: 8px;
+            border-radius: 5px;
+            border-left: 3px solid #667eea;
+            font-size: 0.9em;
+        }
+        
+        .trade-time {
+            color: #888;
+            font-size: 0.85em;
+            margin-bottom: 5px;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.8);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        
+        .modal-content {
+            background: #16161f;
+            padding: 30px;
+            border-radius: 10px;
+            max-width: 500px;
+            width: 90%;
+            border: 1px solid #2a2a3e;
+        }
+        
+        .modal h2 {
+            margin-bottom: 20px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #aaa;
+            font-size: 0.9em;
+        }
+        
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 10px;
+            background: #1a1a2e;
+            border: 1px solid #2a2a3e;
+            border-radius: 5px;
+            color: white;
+            font-size: 1em;
+        }
+        
+        .form-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        
+        .form-actions button {
+            flex: 1;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+        
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #1a1a2e;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎯 Trading Management Dashboard</h1>
+        <div class="mode-badge" id="mode">Loading...</div>
+    </div>
+    
+    <div class="container">
+        <!-- Account Summary -->
+        <div class="account-summary">
+            <div class="summary-card">
+                <h3>💰 Available Balance</h3>
+                <div class="value" id="available">$0.00</div>
+            </div>
+            
+            <div class="summary-card">
+                <h3>🔒 In Orders</h3>
+                <div class="value" id="locked">$0.00</div>
+            </div>
+            
+            <div class="summary-card">
+                <h3>💵 Total Balance</h3>
+                <div class="value" id="total">$0.00</div>
+            </div>
+            
+            <div class="summary-card">
+                <h3>🤖 Allocated to Bots</h3>
+                <div class="value" id="allocated">$0.00</div>
+            </div>
+        </div>
+        
+        <!-- Bots Section -->
+        <div class="section">
+            <div class="section-header">
+                <h2>🤖 Trading Bots</h2>
+                <button class="btn" onclick="showAddBotModal()">➕ Add New Bot</button>
+            </div>
+            
+            <div class="bots-grid" id="bots-grid">
+                <div class="empty-state">No bots yet. Add your first bot!</div>
+            </div>
+        </div>
+        
+        <!-- Recent Trades -->
+        <div class="section">
+            <div class="section-header">
+                <h2>📊 Recent Trades</h2>
+            </div>
+            
+            <div class="trades-list" id="trades-list">
+                <div class="empty-state">No trades yet...</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Add Bot Modal -->
+    <div class="modal" id="add-bot-modal">
+        <div class="modal-content">
+            <h2>➕ Add New Trading Bot</h2>
+            
+            <div class="form-group">
+                <label>Bot Name</label>
+                <input type="text" id="bot-name" placeholder="e.g. BTC Momentum Bot">
+            </div>
+            
+            <div class="form-group">
+                <label>Trading Symbol</label>
+                <input type="text" id="bot-symbol" placeholder="e.g. BTCUSDT" value="BTCUSDT">
+            </div>
+            
+            <div class="form-group">
+                <label>Strategy</label>
+                <select id="bot-strategy">
+                    <option value="simple_profitable">Simple Profitable (Recommended)</option>
+                    <option value="momentum">Momentum</option>
+                    <option value="mean_reversion">Mean Reversion</option>
+                    <option value="breakout">Breakout</option>
+                    <option value="conservative">Conservative</option>
+                    <option value="volatile">Volatile Coins</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label>Trade Amount (USDT)</label>
+                <input type="number" id="bot-amount" placeholder="100" value="100">
+            </div>
+            
+            <div class="form-actions">
+                <button class="btn btn-secondary" onclick="hideAddBotModal()">Cancel</button>
+                <button class="btn" onclick="addBot()">Create Bot</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Edit Bot Modal -->
+    <div class="modal" id="edit-bot-modal">
+        <div class="modal-content">
+            <h2>✏️ Edit Bot Settings</h2>
+            
+            <input type="hidden" id="edit-bot-id">
+            
+            <div class="form-group">
+                <label>Bot Name</label>
+                <input type="text" id="edit-bot-name">
+            </div>
+            
+            <div class="form-group">
+                <label>Trade Amount (USDT)</label>
+                <input type="number" id="edit-bot-amount">
+            </div>
+            
+            <div class="form-actions">
+                <button class="btn btn-secondary" onclick="hideEditBotModal()">Cancel</button>
+                <button class="btn" onclick="saveBot()">Save Changes</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let currentData = {};
+        
+        // Update dashboard
+        function updateDashboard() {
+            fetch('/api/overview')
+                .then(response => response.json())
+                .then(result => {
+                    if (!result.success) {
+                        console.error('Error:', result.error);
+                        return;
+                    }
+                    
+                    currentData = result;
+                    
+                    // Update account info
+                    document.getElementById('available').textContent = '$' + result.account.available.toFixed(2);
+                    document.getElementById('locked').textContent = '$' + result.account.locked.toFixed(2);
+                    document.getElementById('total').textContent = '$' + result.account.total.toFixed(2);
+                    document.getElementById('allocated').textContent = '$' + result.total_allocated.toFixed(2);
+                    document.getElementById('mode').textContent = result.account.mode;
+                    
+                    // Update bots
+                    renderBots(result.bots);
+                    
+                    // Update trades
+                    renderTrades(result.trades);
+                })
+                .catch(error => console.error('Fetch error:', error));
+        }
+        
+        // Render bots
+        function renderBots(bots) {
+            const grid = document.getElementById('bots-grid');
+            
+            if (bots.length === 0) {
+                grid.innerHTML = '<div class="empty-state">No bots yet. Add your first bot!</div>';
+                return;
+            }
+            
+            grid.innerHTML = bots.map(bot => `
+                <div class="bot-card">
+                    <div class="bot-header">
+                        <div class="bot-title">${bot.name}</div>
+                        <div class="bot-status ${bot.status}">${bot.status.toUpperCase()}</div>
+                    </div>
+                    
+                    <div class="bot-info">
+                        <div>📈 ${bot.symbol}</div>
+                        <div>🎯 ${bot.strategy.replace('_', ' ').toUpperCase()}</div>
+                        <div>💵 $${bot.trade_amount} per trade</div>
+                    </div>
+                    
+                    <div class="bot-stats">
+                        <div class="bot-stat">
+                            <div class="label">TRADES</div>
+                            <div class="value">${bot.trades}</div>
+                        </div>
+                        <div class="bot-stat">
+                            <div class="label">PROFIT</div>
+                            <div class="value" style="color: ${bot.profit >= 0 ? '#4caf50' : '#f44336'}">
+                                ${bot.profit >= 0 ? '+' : ''}$${bot.profit.toFixed(2)}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="bot-controls">
+                        ${bot.status === 'stopped' 
+                            ? `<button class="btn btn-sm btn-success" onclick="startBot(${bot.id})">▶ Start</button>`
+                            : `<button class="btn btn-sm btn-danger" onclick="stopBot(${bot.id})">⏹ Stop</button>`
+                        }
+                        <button class="btn btn-sm btn-secondary" onclick="editBot(${bot.id})">✏️ Edit</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteBot(${bot.id})">🗑️</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        // Render trades
+        function renderTrades(trades) {
+            const list = document.getElementById('trades-list');
+            
+            if (trades.length === 0) {
+                list.innerHTML = '<div class="empty-state">No trades yet...</div>';
+                return;
+            }
+            
+            list.innerHTML = trades.map(trade => `
+                <div class="trade-item">
+                    <div class="trade-time">${trade.time}</div>
+                    <div>${trade.info}</div>
+                </div>
+            `).reverse().join('');
+        }
+        
+        // Show/hide modals
+        function showAddBotModal() {
+            document.getElementById('add-bot-modal').style.display = 'flex';
+        }
+        
+        function hideAddBotModal() {
+            document.getElementById('add-bot-modal').style.display = 'none';
+        }
+        
+        function hideEditBotModal() {
+            document.getElementById('edit-bot-modal').style.display = 'none';
+        }
+        
+        // Add bot
+        function addBot() {
+            const data = {
+                name: document.getElementById('bot-name').value,
+                symbol: document.getElementById('bot-symbol').value.toUpperCase(),
+                strategy: document.getElementById('bot-strategy').value,
+                trade_amount: parseFloat(document.getElementById('bot-amount').value)
+            };
+            
+            if (!data.name || !data.symbol || !data.trade_amount) {
+                alert('Please fill all fields');
+                return;
+            }
+            
+            fetch('/api/bot/add', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    hideAddBotModal();
+                    updateDashboard();
+                    
+                    // Clear form
+                    document.getElementById('bot-name').value = '';
+                    document.getElementById('bot-symbol').value = 'BTCUSDT';
+                    document.getElementById('bot-amount').value = '100';
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            });
+        }
+        
+        // Edit bot
+        function editBot(botId) {
+            const bot = currentData.bots.find(b => b.id === botId);
+            if (!bot) return;
+            
+            document.getElementById('edit-bot-id').value = botId;
+            document.getElementById('edit-bot-name').value = bot.name;
+            document.getElementById('edit-bot-amount').value = bot.trade_amount;
+            
+            document.getElementById('edit-bot-modal').style.display = 'flex';
+        }
+        
+        function saveBot() {
+            const botId = parseInt(document.getElementById('edit-bot-id').value);
+            const data = {
+                name: document.getElementById('edit-bot-name').value,
+                trade_amount: parseFloat(document.getElementById('edit-bot-amount').value)
+            };
+            
+            fetch(`/api/bot/${botId}/update`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    hideEditBotModal();
+                    updateDashboard();
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            });
+        }
+        
+        // Start/Stop bot
+        function startBot(botId) {
+            if (!confirm('Start this bot?')) return;
+            
+            fetch(`/api/bot/${botId}/start`, {method: 'POST'})
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        updateDashboard();
+                        alert('Bot started! (Note: This is a simulation. Implement actual bot start logic.)');
+                    } else {
+                        alert('Error: ' + result.error);
+                    }
+                });
+        }
+        
+        function stopBot(botId) {
+            if (!confirm('Stop this bot?')) return;
+            
+            fetch(`/api/bot/${botId}/stop`, {method: 'POST'})
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        updateDashboard();
+                    } else {
+                        alert('Error: ' + result.error);
+                    }
+                });
+        }
+        
+        // Delete bot
+        function deleteBot(botId) {
+            if (!confirm('Delete this bot? This cannot be undone.')) return;
+            
+            fetch(`/api/bot/${botId}/delete`, {method: 'POST'})
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        updateDashboard();
+                    } else {
+                        alert('Error: ' + result.error);
+                    }
+                });
+        }
+        
+        // Close modal on outside click
+        window.onclick = function(event) {
+            if (event.target.classList.contains('modal')) {
+                event.target.style.display = 'none';
+            }
+        }
+        
+        // Initial update
+        updateDashboard();
+        
+        // Auto-refresh every 5 seconds
+        setInterval(updateDashboard, 5000);
+    </script>
+</body>
+</html>"""
+
+def create_template():
+    """Create templates directory and HTML file"""
+    os.makedirs('templates', exist_ok=True)
+    with open('templates/advanced_dashboard.html', 'w') as f:
+        f.write(HTML_TEMPLATE)
+
+def main():
+    """Run the advanced dashboard"""
+    print("=" * 70)
+    print("🌐 ADVANCED TRADING DASHBOARD")
+    print("=" * 70)
+    print()
+    
+    # Validate config
+    try:
+        Config.validate()
+    except ValueError as e:
+        print(f"❌ Configuration error: {e}")
+        return
+    
+    print(f"✓ Mode: {'TESTNET' if Config.USE_TESTNET else 'MAINNET'}")
+    
+    # Create template
+    create_template()
+    
+    print("\n🚀 Starting advanced dashboard...")
+    print("\nAccess dashboard at:")
+    print("  http://localhost:5000")
+    print("  http://127.0.0.1:5000")
+    print("\n✨ Features:")
+    print("  • Manage multiple trading bots")
+    print("  • Start/stop/edit bots")
+    print("  • Adjust trade amounts")
+    print("  • View real-time performance")
+    print("\nPress Ctrl+C to stop\n")
+    
+    app.run(host='0.0.0.0', port=5000, debug=False)
+
+if __name__ == '__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n\n✅ Dashboard stopped")
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        print("\nTo install Flask:")
+        print("  pip install flask")

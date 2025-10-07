@@ -6,6 +6,7 @@
 ```bash
 # Start the bot
 python3 live_trader.py
+ssh root@134.199.159.103
 
 # Keep terminal open
 # Bot runs until you close it or press Ctrl+C
@@ -129,6 +130,8 @@ cd /root/tradingbot
 
 # Install dependencies
 pip3 install -r requirements.txt
+pip3 install -r requirements.txt --break-system-packages
+
 
 # Create .env file
 nano .env
