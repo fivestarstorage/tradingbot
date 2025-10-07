@@ -354,29 +354,87 @@ class NewsMonitor:
             return []
     
     def extract_mentioned_symbols(self, text):
-        """Extract crypto symbols mentioned in text"""
-        # Common crypto symbols
+        """Extract crypto symbols mentioned in text (EXPANDED!)"""
+        # All supported crypto symbols and their common names
         symbols = {
+            # Major coins
             'BTC': 'BTCUSDT',
             'BITCOIN': 'BTCUSDT',
             'ETH': 'ETHUSDT',
             'ETHEREUM': 'ETHUSDT',
             'BNB': 'BNBUSDT',
             'BINANCE': 'BNBUSDT',
+            
+            # Layer 1s
             'SOL': 'SOLUSDT',
             'SOLANA': 'SOLUSDT',
             'XRP': 'XRPUSDT',
             'RIPPLE': 'XRPUSDT',
             'ADA': 'ADAUSDT',
             'CARDANO': 'ADAUSDT',
-            'DOGE': 'DOGEUSDT',
-            'DOGECOIN': 'DOGEUSDT',
             'AVAX': 'AVAXUSDT',
             'AVALANCHE': 'AVAXUSDT',
             'DOT': 'DOTUSDT',
             'POLKADOT': 'DOTUSDT',
+            'TRX': 'TRXUSDT',
+            'TRON': 'TRXUSDT',
+            'TON': 'TONUSDT',
+            'TELEGRAM': 'TONUSDT',
+            'NEAR': 'NEARUSDT',
+            'ATOM': 'ATOMUSDT',
+            'COSMOS': 'ATOMUSDT',
+            'SUI': 'SUIUSDT',
+            'APT': 'APTUSDT',
+            'APTOS': 'APTUSDT',
+            'ICP': 'ICPUSDT',
+            'INTERNET COMPUTER': 'ICPUSDT',
+            'FIL': 'FILUSDT',
+            'FILECOIN': 'FILUSDT',
+            'VET': 'VETUSDT',
+            'VECHAIN': 'VETUSDT',
+            'ALGO': 'ALGOUSDT',
+            'ALGORAND': 'ALGOUSDT',
+            'HBAR': 'HBARUSDT',
+            'HEDERA': 'HBARUSDT',
+            'STX': 'STXUSDT',
+            'STACKS': 'STXUSDT',
+            'INJ': 'INJUSDT',
+            'INJECTIVE': 'INJUSDT',
+            
+            # Layer 2s
             'MATIC': 'MATICUSDT',
-            'POLYGON': 'MATICUSDT'
+            'POLYGON': 'MATICUSDT',
+            'ARB': 'ARBUSDT',
+            'ARBITRUM': 'ARBUSDT',
+            'OP': 'OPUSDT',
+            'OPTIMISM': 'OPUSDT',
+            
+            # DeFi
+            'LINK': 'LINKUSDT',
+            'CHAINLINK': 'LINKUSDT',
+            'UNI': 'UNIUSDT',
+            'UNISWAP': 'UNIUSDT',
+            'AAVE': 'AAVEUSDT',
+            'MKR': 'MKRUSDT',
+            'MAKER': 'MKRUSDT',
+            'LDO': 'LDOUSDT',
+            'LIDO': 'LDOUSDT',
+            'RNDR': 'RNDRUSDT',
+            'RENDER': 'RNDRUSDT',
+            
+            # Memecoins
+            'DOGE': 'DOGEUSDT',
+            'DOGECOIN': 'DOGEUSDT',
+            'SHIB': 'SHIBUSDT',
+            'SHIBA': 'SHIBUSDT',
+            'SHIBA INU': 'SHIBUSDT',
+            'PEPE': 'PEPEUSDT',
+            
+            # Others
+            'LTC': 'LTCUSDT',
+            'LITECOIN': 'LTCUSDT',
+            'ETC': 'ETCUSDT',
+            'ETHEREUM CLASSIC': 'ETCUSDT',
         }
         
         text_upper = text.upper()

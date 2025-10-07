@@ -23,25 +23,37 @@
 
 ## 🎯 **Part 2: How AI Autonomous Trading Works**
 
-### **📍 Supported Coins (15 Coins):**
+### **📍 Supported Coins (38 Coins!) - EXPANDED:**
 
 The AI can trade these coins on Binance:
-```python
-'BTCUSDT'   # Bitcoin
-'ETHUSDT'   # Ethereum
-'BNBUSDT'   # Binance Coin
-'SOLUSDT'   # Solana
-'XRPUSDT'   # Ripple
-'ADAUSDT'   # Cardano
-'DOGEUSDT'  # Dogecoin
-'AVAXUSDT'  # Avalanche
-'DOTUSDT'   # Polkadot
-'MATICUSDT' # Polygon
-'LINKUSDT'  # Chainlink
-'UNIUSDT'   # Uniswap
-'LTCUSDT'   # Litecoin
-'ATOMUSDT'  # Cosmos
-'ETCUSDT'   # Ethereum Classic
+
+**Layer 1 Blockchains (21 coins):**
+```
+BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT, 
+ADAUSDT, AVAXUSDT, DOTUSDT, TRXUSDT, TONUSDT,
+NEARUSDT, ATOMUSDT, SUIUSDT, APTUSDT, ICPUSDT,
+FILUSDT, VETUSDT, ALGOUSDT, HBARUSDT, STXUSDT, INJUSDT
+```
+
+**Layer 2 & Scaling (3 coins):**
+```
+MATICUSDT (Polygon), ARBUSDT (Arbitrum), OPUSDT (Optimism)
+```
+
+**DeFi Tokens (6 coins):**
+```
+LINKUSDT (Chainlink), UNIUSDT (Uniswap), AAVEUSDT (Aave),
+MKRUSDT (Maker), LDOUSDT (Lido), RNDRUSDT (Render)
+```
+
+**Memecoins (3 coins):**
+```
+DOGEUSDT (Dogecoin), SHIBUSDT (Shiba Inu), PEPEUSDT (Pepe)
+```
+
+**Others (5 coins):**
+```
+LTCUSDT (Litecoin), ETCUSDT (Ethereum Classic)
 ```
 
 **The AI ONLY trades coins from this list** (because they're available on Binance with USDT pairs).

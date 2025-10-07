@@ -43,11 +43,52 @@ class AIAutonomousStrategy:
         self.min_confidence = 80  # Higher threshold for autonomous trading
         self.max_articles_per_cycle = 20  # Analyze MORE news articles
         
-        # Supported trading pairs on Binance
+        # Supported trading pairs on Binance (EXPANDED!)
         self.supported_symbols = [
-            'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT',
-            'ADAUSDT', 'DOGEUSDT', 'AVAXUSDT', 'DOTUSDT', 'MATICUSDT',
-            'LINKUSDT', 'UNIUSDT', 'LTCUSDT', 'ATOMUSDT', 'ETCUSDT'
+            # Top Market Cap (Layer 1s)
+            'BTCUSDT',    # Bitcoin
+            'ETHUSDT',    # Ethereum
+            'BNBUSDT',    # Binance Coin
+            'SOLUSDT',    # Solana
+            'XRPUSDT',    # Ripple
+            'ADAUSDT',    # Cardano
+            'AVAXUSDT',   # Avalanche
+            'DOTUSDT',    # Polkadot
+            'TRXUSDT',    # Tron
+            'TONUSDT',    # TON (Telegram)
+            'NEARUSDT',   # NEAR Protocol
+            'ATOMUSDT',   # Cosmos
+            'SUIUSDT',    # Sui
+            'APTUSDT',    # Aptos
+            'ICPUSDT',    # Internet Computer
+            'FILUSDT',    # Filecoin
+            'VETUSDT',    # VeChain
+            'ALGOUSDT',   # Algorand
+            'HBARUSDT',   # Hedera
+            'STXUSDT',    # Stacks
+            'INJUSDT',    # Injective
+            
+            # Layer 2s & Scaling
+            'MATICUSDT',  # Polygon
+            'ARBUSDT',    # Arbitrum
+            'OPUSDT',     # Optimism
+            
+            # DeFi
+            'LINKUSDT',   # Chainlink
+            'UNIUSDT',    # Uniswap
+            'AAVEUSDT',   # Aave
+            'MKRUSDT',    # Maker
+            'LDOUSDT',    # Lido DAO
+            'RNDRUSDT',   # Render
+            
+            # Popular/Memecoins
+            'DOGEUSDT',   # Dogecoin
+            'SHIBUSDT',   # Shiba Inu
+            'PEPEUSDT',   # Pepe
+            
+            # Others
+            'LTCUSDT',    # Litecoin
+            'ETCUSDT',    # Ethereum Classic
         ]
         
         # Position Management
