@@ -184,6 +184,8 @@ class AINewsStrategy:
 def test_strategy():
     """Test the AI news strategy"""
     import os
+    from dotenv import load_dotenv
+    load_dotenv()
     
     print("=" * 70)
     print("🎯 TESTING AI NEWS TRADING STRATEGY")

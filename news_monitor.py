@@ -158,7 +158,8 @@ class NewsMonitor:
 def test_news_monitor():
     """Test the news monitor"""
     import os
-    from config import Config
+    from dotenv import load_dotenv
+    load_dotenv()
     
     print("=" * 70)
     print("📰 TESTING NEWS MONITOR")

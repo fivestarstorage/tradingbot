@@ -192,6 +192,10 @@ Only recommend BUY/SELL if you're >70% confident. Otherwise say HOLD."""
 
 def test_analyzer():
     """Test the AI analyzer"""
+    # Load environment variables
+    from dotenv import load_dotenv
+    load_dotenv()
+    
     print("=" * 70)
     print("🤖 TESTING AI NEWS ANALYZER")
     print("=" * 70)
