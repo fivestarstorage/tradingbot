@@ -117,6 +117,8 @@ class BotRunner:
                     self.symbol = data.get('symbol', self.symbol)
                     self.has_traded = data.get('has_traded', False)
                     self.initial_investment = data.get('initial_investment', 0.0)
+                    capital_additions = data.get('capital_additions', [])
+                    
                     self.logger.info("=" * 70)
                     self.logger.info(f"📂 LOADED EXISTING POSITION FROM FILE")
                     self.logger.info(f"   Symbol: {self.symbol}")
@@ -124,7 +126,11 @@ class BotRunner:
                     self.logger.info(f"   Stop Loss: ${self.stop_loss:.2f}")
                     self.logger.info(f"   Take Profit: ${self.take_profit:.2f}")
                     if self.has_traded:
-                        self.logger.info(f"   Initial Investment: ${self.initial_investment:.2f}")
+                        self.logger.info(f"   Total Investment: ${self.initial_investment:.2f}")
+                        if capital_additions:
+                            self.logger.info(f"   Capital Additions: {len(capital_additions)} time(s)")
+                            for addition in capital_additions[-3:]:  # Show last 3
+                                self.logger.info(f"      + ${addition['amount']:.2f} on {addition['timestamp'][:10]}")
                     self.logger.info("=" * 70)
         except Exception as e:
             self.logger.error(f"Error loading position: {e}")

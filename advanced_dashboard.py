@@ -731,6 +731,78 @@ def stop_bot(bot_id):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/bot/<int:bot_id>/add_funds', methods=['POST'])
+def add_funds_to_bot(bot_id):
+    """Add more funds to an existing bot"""
+    try:
+        data = request.json
+        amount = float(data.get('amount', 0))
+        
+        if amount <= 0:
+            return jsonify({'success': False, 'error': 'Amount must be greater than 0'})
+        
+        # Get available USDT balance
+        usdt_balance = manager.client.get_account_balance('USDT')
+        available = float(usdt_balance.get('free', 0)) if usdt_balance else 0
+        
+        if available < amount:
+            return jsonify({
+                'success': False, 
+                'error': f'Insufficient USDT. Available: ${available:.2f}, Requested: ${amount:.2f}'
+            })
+        
+        # Update bot's position file if it exists
+        position_file = f'bot_{bot_id}_position.json'
+        if os.path.exists(position_file):
+            import json
+            with open(position_file, 'r') as f:
+                position_data = json.load(f)
+            
+            # Track capital additions
+            if 'capital_additions' not in position_data:
+                position_data['capital_additions'] = []
+            
+            position_data['capital_additions'].append({
+                'amount': amount,
+                'timestamp': datetime.now().isoformat()
+            })
+            
+            # Update initial investment
+            old_investment = position_data.get('initial_investment', 0)
+            position_data['initial_investment'] = old_investment + amount
+            
+            with open(position_file, 'w') as f:
+                json.dump(position_data, f, indent=2)
+            
+            return jsonify({
+                'success': True,
+                'message': f'Added ${amount:.2f} to bot. Total investment now: ${position_data["initial_investment"]:.2f}',
+                'new_total': position_data['initial_investment']
+            })
+        else:
+            # Bot hasn't traded yet, just update trade_amount
+            bots = manager.get_bots()
+            for bot in bots:
+                if bot['id'] == bot_id:
+                    old_amount = bot['trade_amount']
+                    bot['trade_amount'] = old_amount + amount
+                    manager.save_bots(bots)
+                    return jsonify({
+                        'success': True,
+                        'message': f'Added ${amount:.2f} to bot. Initial investment set to: ${bot["trade_amount"]:.2f}',
+                        'new_total': bot['trade_amount']
+                    })
+            
+            return jsonify({'success': False, 'error': 'Bot not found'})
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False, 
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        })
+
 
 # ==================== HTML TEMPLATE ====================
 
@@ -1329,6 +1401,46 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </div>
     </div>
     
+    <!-- Add Funds Modal -->
+    <div class="modal" id="add-funds-modal">
+        <div class="modal-content">
+            <h2>💰 Add Funds to Bot</h2>
+            
+            <input type="hidden" id="add-funds-bot-id">
+            
+            <div class="form-group">
+                <label>Available USDT Balance</label>
+                <div id="available-usdt" style="font-size: 1.5em; font-weight: bold; color: #4caf50; margin: 10px 0;">
+                    Loading...
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label>Amount to Add (USDT)</label>
+                <input type="number" id="add-funds-amount" placeholder="Enter amount" min="1" step="0.01">
+                <small style="color: #888; display: block; margin-top: 5px;">
+                    This will increase the bot's total investment. The bot will use this additional capital on its next buy.
+                </small>
+            </div>
+            
+            <div class="form-group">
+                <label>Quick Add</label>
+                <div style="display: flex; gap: 10px; margin-top: 10px;">
+                    <button class="btn btn-sm btn-secondary" onclick="setAddAmount(10)">+$10</button>
+                    <button class="btn btn-sm btn-secondary" onclick="setAddAmount(25)">+$25</button>
+                    <button class="btn btn-sm btn-secondary" onclick="setAddAmount(50)">+$50</button>
+                    <button class="btn btn-sm btn-secondary" onclick="setAddAmount(100)">+$100</button>
+                    <button class="btn btn-sm btn-secondary" onclick="setAddAmountMax()">Max</button>
+                </div>
+            </div>
+            
+            <div class="form-actions">
+                <button class="btn btn-secondary" onclick="hideAddFundsModal()">Cancel</button>
+                <button class="btn" style="background: #4caf50;" onclick="addFunds()">Add Funds</button>
+            </div>
+        </div>
+    </div>
+    
     <!-- Coin Details Modal -->
     <div class="modal" id="coin-details-modal">
         <div class="modal-content" style="max-width: 800px;">
@@ -1492,6 +1604,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                             : `<button class="btn btn-sm btn-danger" onclick="stopBot(${bot.id})">⏹ Stop</button>`
                         }
                         <button class="btn btn-sm btn-secondary" onclick="editBot(${bot.id})">✏️ Edit</button>
+                        <button class="btn btn-sm" style="background: #4caf50;" onclick="showAddFundsModal(${bot.id})">💰 Add Funds</button>
                         <button class="btn btn-sm btn-danger" onclick="deleteBot(${bot.id})">🗑️</button>
                     </div>
                 </div>
@@ -1543,6 +1656,78 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         
         function hideEditBotModal() {
             document.getElementById('edit-bot-modal').style.display = 'none';
+        }
+        
+        // Show/hide add funds modal
+        function showAddFundsModal(botId) {
+            document.getElementById('add-funds-bot-id').value = botId;
+            document.getElementById('add-funds-amount').value = '';
+            document.getElementById('add-funds-modal').style.display = 'flex';
+            
+            // Fetch and display available USDT balance
+            fetch('/api/overview')
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        document.getElementById('available-usdt').textContent = 
+                            '$' + result.account.available.toFixed(2);
+                    } else {
+                        document.getElementById('available-usdt').textContent = 'Error loading';
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('available-usdt').textContent = 'Error loading';
+                });
+        }
+        
+        function hideAddFundsModal() {
+            document.getElementById('add-funds-modal').style.display = 'none';
+        }
+        
+        function setAddAmount(amount) {
+            document.getElementById('add-funds-amount').value = amount;
+        }
+        
+        function setAddAmountMax() {
+            // Get available balance from the displayed value
+            const availableText = document.getElementById('available-usdt').textContent;
+            const available = parseFloat(availableText.replace('$', '').replace(',', ''));
+            if (!isNaN(available)) {
+                document.getElementById('add-funds-amount').value = available.toFixed(2);
+            }
+        }
+        
+        function addFunds() {
+            const botId = parseInt(document.getElementById('add-funds-bot-id').value);
+            const amount = parseFloat(document.getElementById('add-funds-amount').value);
+            
+            if (!amount || amount <= 0) {
+                alert('Please enter a valid amount');
+                return;
+            }
+            
+            if (!confirm(`Add $${amount.toFixed(2)} to this bot?\n\nThis will increase the bot's total investment and it will use the additional capital on its next buy.`)) {
+                return;
+            }
+            
+            fetch(`/api/bot/${botId}/add_funds`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ amount: amount })
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    hideAddFundsModal();
+                    updateDashboard();
+                    alert(result.message);
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            })
+            .catch(error => {
+                alert('Error adding funds: ' + error.message);
+            });
         }
         
         // Add bot
