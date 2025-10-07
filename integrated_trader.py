@@ -73,6 +73,10 @@ class BotRunner:
         
         self.strategy = strategy_class()
         
+        # Store symbol in strategy for AI strategies
+        if hasattr(self.strategy, 'set_symbol'):
+            self.strategy.set_symbol(self.symbol)
+        
         self.position = None
         self.entry_price = None
         self.stop_loss = None
@@ -84,27 +88,9 @@ class BotRunner:
         self.sms_notifier = TwilioNotifier()
     
     def get_data(self, limit=100):
-        """Fetch recent klines and convert to DataFrame"""
-        import pandas as pd
-        
+        """Fetch recent klines - return raw format for strategy.analyze()"""
         klines = self.client.get_klines(self.symbol, interval='5m', limit=limit)
-        if not klines:
-            return pd.DataFrame()
-        
-        data = []
-        for k in klines:
-            data.append({
-                'timestamp': k[0],
-                'open': float(k[1]),
-                'high': float(k[2]),
-                'low': float(k[3]),
-                'close': float(k[4]),
-                'volume': float(k[5])
-            })
-        
-        # Convert to DataFrame for compatibility with all strategies
-        df = pd.DataFrame(data)
-        return df
+        return klines if klines else []
     
     def execute_trade(self, signal, current_price):
         """Execute buy/sell orders"""
@@ -206,15 +192,17 @@ class BotRunner:
             try:
                 # Get market data
                 data = self.get_data(limit=100)
-                if data.empty:
+                if not data or len(data) == 0:
                     self.logger.warning("No data received, retrying...")
                     time.sleep(60)
                     continue
                 
-                current_price = data.iloc[-1]['close']
+                # Extract current price from raw klines
+                current_price = float(data[-1][4])  # Close price is index 4
                 
-                # Get signal
-                signal_data = self.strategy.generate_signal(data)
+                # Get signal using strategy's analyze() method
+                # This handles indicator calculation internally
+                signal_data = self.strategy.analyze(data)
                 signal = signal_data['signal']
                 
                 # Log status

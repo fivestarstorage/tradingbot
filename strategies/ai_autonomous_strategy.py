@@ -57,6 +57,10 @@ class AIAutonomousStrategy:
         # Last decision
         self.last_decision = None
     
+    def analyze(self, klines):
+        """Wrapper for compatibility with live trader - AI doesn't need klines"""
+        return self.generate_signal(data=None, symbol='BTCUSDT')
+    
     def generate_signal(self, data=None, symbol='BTCUSDT'):
         """
         Generate trading signal - AI picks the coin!

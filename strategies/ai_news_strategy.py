@@ -31,6 +31,9 @@ class AINewsStrategy:
         self.news_monitor = NewsMonitor(newsapi_key=newsapi_key)
         self.ai_analyzer = AINewsAnalyzer(api_key=openai_key)
         
+        # Symbol to trade (set by live trader)
+        self.symbol = 'BTCUSDT'
+        
         # Configuration
         self.min_confidence = 75  # Minimum AI confidence to trade
         self.max_articles_per_cycle = 5  # Limit API costs
@@ -42,6 +45,15 @@ class AINewsStrategy:
         # Cache recent analyses
         self.recent_analyses = []
         self.max_cache = 20
+    
+    def set_symbol(self, symbol):
+        """Set the trading symbol for this strategy"""
+        self.symbol = symbol
+    
+    def analyze(self, klines):
+        """Wrapper for compatibility with live trader"""
+        # Use the stored symbol (set by trader during initialization)
+        return self.generate_signal(data=None, symbol=self.symbol)
     
     def generate_signal(self, data=None, symbol='BTCUSDT'):
         """
