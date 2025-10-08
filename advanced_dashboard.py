@@ -651,6 +651,35 @@ def get_git_status():
             'traceback': traceback.format_exc()
         })
 
+@app.route('/api/dashboard/restart', methods=['POST'])
+def restart_dashboard():
+    """Restart the dashboard server"""
+    try:
+        import subprocess
+        import threading
+        import time
+        
+        def do_restart():
+            time.sleep(1)  # Give time to send response
+            # Kill current dashboard screen and restart
+            subprocess.run(['screen', '-S', 'dashboard', '-X', 'quit'])
+            subprocess.run(['screen', '-dmS', 'dashboard', 'python3', 'advanced_dashboard.py'])
+        
+        # Schedule restart in background
+        thread = threading.Thread(target=do_restart)
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Dashboard restart initiated. Page will refresh in 5 seconds...'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
 @app.route('/api/coin/<symbol>')
 def get_coin_details(symbol):
     """Get detailed information about a specific coin"""
@@ -1725,7 +1754,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div class="form-group">
                 <label>Strategy</label>
                 <select id="bot-strategy" onchange="updateSymbolHelp()">
-                    <option value="simple_profitable">Simple Profitable (Recommended)</option>
+                    <option value="ticker_news">📰 Ticker News Trading (NEWS-DRIVEN) ⭐ NEW!</option>
+                    <option value="simple_profitable">Simple Profitable (Technical)</option>
                     <option value="ai_autonomous">🤖 AI Autonomous (AI Picks Coin!)</option>
                     <option value="ai_news">🤖 AI News Trading (Single Coin)</option>
                     <option value="momentum">Momentum</option>
@@ -1736,9 +1766,30 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </select>
             </div>
             
-            <div class="form-group">
+            <!-- Symbol input (for most strategies) -->
+            <div class="form-group" id="symbol-input-group">
                 <label>Trading Symbol <span id="symbol-help" style="color: #888; font-size: 0.85em;"></span></label>
                 <input type="text" id="bot-symbol" placeholder="e.g. BTCUSDT" value="BTCUSDT">
+            </div>
+            
+            <!-- Ticker dropdown (for ticker_news strategy) -->
+            <div class="form-group" id="ticker-select-group" style="display: none;">
+                <label>Select Ticker <span style="color: #667eea;">📰 News will be fetched for this ticker</span></label>
+                <select id="bot-ticker">
+                    <option value="BTC">BTC - Bitcoin</option>
+                    <option value="ETH">ETH - Ethereum</option>
+                    <option value="SOL">SOL - Solana</option>
+                    <option value="XRP">XRP - Ripple</option>
+                    <option value="ADA">ADA - Cardano</option>
+                    <option value="DOGE">DOGE - Dogecoin</option>
+                    <option value="MATIC">MATIC - Polygon</option>
+                    <option value="DOT">DOT - Polkadot</option>
+                    <option value="AVAX">AVAX - Avalanche</option>
+                    <option value="LINK">LINK - Chainlink</option>
+                </select>
+                <div style="color: #888; font-size: 0.8em; margin-top: 5px;">
+                    📰 Bot will fetch news for this ticker every hour and trade based on AI analysis
+                </div>
             </div>
             
             <div class="form-group">
@@ -2061,10 +2112,37 @@ This will update your code to the latest version.`)) {
         }
         
         function restartDashboard() {
-            alert(`To restart the dashboard, run on your server:
+            if (!confirm(`Restart the dashboard now?
 
-screen -S dashboard -X quit
-screen -dmS dashboard python3 advanced_dashboard.py`);
+This will:
+• Stop the current dashboard server
+• Start a new instance
+• Refresh this page automatically
+
+Continue?`)) {
+                return;
+            }
+            
+            fetch('/api/dashboard/restart', { method: 'POST' })
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        alert(result.message);
+                        // Refresh page after 5 seconds
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 5000);
+                    } else {
+                        alert('Error restarting dashboard: ' + result.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Restart error:', error);
+                    // Dashboard might have restarted, try refreshing anyway
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 5000);
+                });
         }
         
         function viewUpdateLog() {
@@ -2290,15 +2368,29 @@ tail -f /root/tradingbot/auto_update.log`);
         function updateSymbolHelp() {
             const strategy = document.getElementById('bot-strategy').value;
             const helpText = document.getElementById('symbol-help');
+            const symbolInputGroup = document.getElementById('symbol-input-group');
+            const tickerSelectGroup = document.getElementById('ticker-select-group');
             
-            if (strategy === 'ai_autonomous') {
-                helpText.textContent = '(ignored - AI picks the coin!)';
-                helpText.style.color = '#f39c12';
-            } else if (strategy === 'ai_news') {
-                helpText.textContent = '(which coin to monitor)';
-                helpText.style.color = '#888';
+            // Show/hide appropriate input based on strategy
+            if (strategy === 'ticker_news') {
+                // Show ticker dropdown for news-driven strategy
+                symbolInputGroup.style.display = 'none';
+                tickerSelectGroup.style.display = 'block';
             } else {
-                helpText.textContent = '';
+                // Show symbol input for all other strategies
+                symbolInputGroup.style.display = 'block';
+                tickerSelectGroup.style.display = 'none';
+                
+                // Update help text
+                if (strategy === 'ai_autonomous') {
+                    helpText.textContent = '(ignored - AI picks the coin!)';
+                    helpText.style.color = '#f39c12';
+                } else if (strategy === 'ai_news') {
+                    helpText.textContent = '(which coin to monitor)';
+                    helpText.style.color = '#888';
+                } else {
+                    helpText.textContent = '';
+                }
             }
         }
         
@@ -2402,10 +2494,21 @@ tail -f /root/tradingbot/auto_update.log`);
         
         // Add bot
         function addBot() {
+            const strategy = document.getElementById('bot-strategy').value;
+            let symbol;
+            
+            // For ticker_news strategy, use ticker dropdown
+            if (strategy === 'ticker_news') {
+                const ticker = document.getElementById('bot-ticker').value;
+                symbol = ticker + 'USDT';  // Convert ticker to symbol (e.g., BTC -> BTCUSDT)
+            } else {
+                symbol = document.getElementById('bot-symbol').value.toUpperCase();
+            }
+            
             const data = {
                 name: document.getElementById('bot-name').value,
-                symbol: document.getElementById('bot-symbol').value.toUpperCase(),
-                strategy: document.getElementById('bot-strategy').value,
+                symbol: symbol,
+                strategy: strategy,
                 trade_amount: parseFloat(document.getElementById('bot-amount').value)
             };
             
@@ -2428,7 +2531,10 @@ tail -f /root/tradingbot/auto_update.log`);
                     // Clear form
                     document.getElementById('bot-name').value = '';
                     document.getElementById('bot-symbol').value = 'BTCUSDT';
-                    document.getElementById('bot-amount').value = '100';
+                    document.getElementById('bot-ticker').value = 'BTC';
+                    document.getElementById('bot-amount').value = '200';
+                    document.getElementById('bot-strategy').value = 'ticker_news';
+                    updateSymbolHelp(); // Reset to default view
                 } else {
                     alert('Error: ' + result.error);
                 }

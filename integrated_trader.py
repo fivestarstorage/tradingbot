@@ -25,9 +25,11 @@ from strategies.breakout_strategy import BreakoutStrategy
 from strategies.conservative_strategy import ConservativeStrategy
 from strategies.ai_news_strategy import AINewsStrategy
 from strategies.ai_autonomous_strategy import AIAutonomousStrategy
+from strategies.ticker_news_strategy import TickerNewsStrategy
 
 # Strategy mapping
 STRATEGIES = {
+    'ticker_news': TickerNewsStrategy,
     'simple_profitable': SimpleProfitableStrategy,
     'ai_autonomous': AIAutonomousStrategy,
     'ai_news': AINewsStrategy,
