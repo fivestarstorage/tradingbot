@@ -566,8 +566,20 @@ manager = BotManager()
 
 @app.route('/')
 def index():
-    """Main dashboard page"""
-    return render_template('advanced_dashboard.html')
+    """Main dashboard page - always serve fresh (no cache)"""
+    # Regenerate template from latest code
+    create_template()
+    
+    # Create response with cache-busting headers
+    from flask import make_response
+    response = make_response(render_template('advanced_dashboard.html'))
+    
+    # Prevent browser caching
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, public, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    
+    return response
 
 @app.route('/api/overview')
 def overview():
@@ -1137,6 +1149,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <!-- Cache Busting: Force browser to always fetch fresh content -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    
     <title>Trading Management Dashboard</title>
     <style>
         * {
