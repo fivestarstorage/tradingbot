@@ -30,8 +30,7 @@ class BotManager:
         )
         
         # Auto-create bots for orphaned coins on startup
-        # DISABLED: Uncomment the line below to enable auto-manager
-        # self._auto_create_bots_for_orphaned_coins()
+        self._auto_create_bots_for_orphaned_coins()
     
     def get_bots(self):
         """Load all active bots from file and check real status"""
@@ -316,27 +315,46 @@ class BotManager:
                 for coin in orphaned_coins:
                     print(f"   • {coin['asset']}: {coin['balance']:.8f}")
                 
-                print(f"\n🤖 Auto-creating management bots...")
+                # Get available USDT for allocation
+                usdt_balance = self.client.get_account_balance('USDT')
+                available_usdt = usdt_balance['free'] if usdt_balance else 0
+                
+                print(f"\n💰 Available USDT for allocation: ${available_usdt:.2f}")
+                print(f"\n🤖 Auto-creating Ticker News Trading bots...")
+                print(f"   Each bot will: Monitor news hourly → AI analysis → Trade decisions")
+                
+                # Calculate default allocation per coin (or use minimum)
+                default_allocation = 100.0  # Default $100 per coin
+                total_allocated = 0.0
+                
                 for coin in orphaned_coins:
-                    # Create a bot with AI Autonomous strategy (best for unknown coins)
-                    bot_name = f"Auto-Manager: {coin['asset']}"
+                    # Create a bot with Ticker News Trading strategy
+                    bot_name = f"📰 {coin['asset']} News Trader"
                     
-                    # Use a default trade amount of $100
-                    # (bot won't buy more, just manage existing position)
+                    # Use default allocation (can be changed in dashboard later)
+                    allocation = default_allocation
+                    
                     new_bot = self.add_bot(
                         name=bot_name,
                         symbol=coin['symbol'],
-                        strategy='ai_autonomous',
-                        trade_amount=100.0
+                        strategy='ticker_news',
+                        trade_amount=allocation
                     )
+                    
+                    total_allocated += allocation
                     
                     print(f"   ✅ Created: {bot_name} (Bot #{new_bot['id']})")
                     print(f"      Symbol: {coin['symbol']}")
-                    print(f"      Strategy: AI Autonomous (will manage sell timing)")
+                    print(f"      Strategy: Ticker News Trading")
+                    print(f"      Allocated USDT: ${allocation:.2f}")
+                    print(f"      Purpose: Manage existing {coin['asset']} + buy more if needed")
                 
+                print(f"\n💰 Total USDT Allocated: ${total_allocated:.2f}")
+                print(f"💰 Remaining USDT: ${available_usdt - total_allocated:.2f}")
                 print(f"\n💡 Auto-created bots are STOPPED by default.")
                 print(f"   Start them via dashboard to begin management.")
-                print(f"   They will detect existing positions and manage them.\n")
+                print(f"   They will detect existing positions and manage them.")
+                print(f"   Allocated USDT will be used for buying MORE if AI recommends.\n")
             else:
                 print("   ✅ All coins are already managed or have 0 balance\n")
         
@@ -1540,6 +1558,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <h3>🤖 Allocated to Bots</h3>
                 <div class="value" id="allocated">$0.00</div>
             </div>
+            
+            <div class="summary-card" style="border: 2px solid #667eea;">
+                <h3>✨ Available for Allocation</h3>
+                <div class="value" id="available-allocation" style="color: #667eea;">$0.00</div>
+                <div style="font-size: 0.75em; color: #888; margin-top: 8px;">
+                    USDT you can allocate to new/existing bots
+                </div>
+            </div>
         </div>
         
         <!-- Asset Breakdown -->
@@ -2175,6 +2201,20 @@ tail -f /root/tradingbot/auto_update.log`);
                     document.getElementById('allocated').textContent = '$' + result.total_allocated.toFixed(2);
                     document.getElementById('mode').textContent = result.account.mode;
                     
+                    // Calculate and display available USDT for allocation
+                    // Get USDT balance from balances array
+                    let usdtBalance = 0;
+                    const usdtAsset = result.account.balances.find(b => b.asset === 'USDT');
+                    if (usdtAsset) {
+                        usdtBalance = usdtAsset.free; // Use 'free' balance (not locked in orders)
+                    }
+                    
+                    const availableForAllocation = Math.max(0, usdtBalance - result.total_allocated);
+                    document.getElementById('available-allocation').textContent = '$' + availableForAllocation.toFixed(2);
+                    
+                    // Store for validation when adding bots
+                    window.availableUSDT = availableForAllocation;
+                    
                     // Show error if present
                     if (result.account.error) {
                         console.error('Account error:', result.account.error);
@@ -2469,6 +2509,17 @@ tail -f /root/tradingbot/auto_update.log`);
                 return;
             }
             
+            // Validate allocation doesn't exceed available USDT
+            if (window.availableUSDT !== undefined && amount > window.availableUSDT) {
+                alert(`❌ Insufficient USDT for allocation!
+
+Requested: $${amount.toFixed(2)}
+Available: $${window.availableUSDT.toFixed(2)}
+
+You can only allocate up to $${window.availableUSDT.toFixed(2)} USDT.`);
+                return;
+            }
+            
             if (!confirm(`Add $${amount.toFixed(2)} to this bot?\n\nThis will increase the bot's total investment and it will use the additional capital on its next buy.`)) {
                 return;
             }
@@ -2515,6 +2566,22 @@ tail -f /root/tradingbot/auto_update.log`);
             
             if (!data.name || !data.symbol || !data.trade_amount) {
                 alert('Please fill all fields');
+                return;
+            }
+            
+            // Validate allocation doesn't exceed available USDT
+            if (window.availableUSDT !== undefined && data.trade_amount > window.availableUSDT) {
+                alert(`❌ Insufficient USDT for allocation!
+
+Requested: $${data.trade_amount.toFixed(2)}
+Available: $${window.availableUSDT.toFixed(2)}
+
+You can only allocate up to $${window.availableUSDT.toFixed(2)} USDT.
+
+💡 Tip: 
+• Deposit more USDT to your account
+• Reduce other bot allocations
+• Or enter a lower amount`);
                 return;
             }
             
