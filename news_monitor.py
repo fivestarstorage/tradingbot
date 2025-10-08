@@ -26,10 +26,10 @@ class NewsMonitor:
         # Track seen articles to avoid duplicates
         self.seen_articles = set()
         
-        # CACHING to reduce API calls (CRITICAL for 3 calls/day limit!)
+        # CACHING to reduce API calls (1 HOUR for fresh news!)
         self.cached_articles = []
         self.cache_time = None
-        self.cache_duration = 28800  # Cache for 8 HOURS (28800 seconds) for 3 calls/day
+        self.cache_duration = 3600  # Cache for 1 HOUR (3600 seconds) - Fresh news every hour!
         
         # Rate limiting
         self.last_api_call = None

@@ -60,19 +60,24 @@ class AIAutonomousStrategy:
         self.entry_time = None
         self.position_confidence = 0
         
-        # Risk Management
-        self.stop_loss_pct = 0.03  # 3% stop loss
-        self.take_profit_pct = 0.05  # 5% take profit
+        # Risk Management (BASE VALUES - AI can adjust these!)
+        self.stop_loss_pct = 0.03  # 3% stop loss (base)
+        self.take_profit_pct = 0.05  # 5% take profit (base)
         self.max_hold_hours = 24  # Max time to hold a position
+        
+        # Dynamic risk adjustment
+        self.current_stop_loss = self.stop_loss_pct
+        self.current_take_profit = self.take_profit_pct
+        self.current_confidence_threshold = self.min_confidence
         
         # Cache analyses
         self.recent_analyses = []
         self.max_cache = 50
         
-        # AI ANALYSIS CACHE (CRITICAL to avoid repeated OpenAI calls!)
+        # AI ANALYSIS CACHE (1 HOUR to ensure fresh news hourly!)
         self.ai_analysis_cache = {}  # article_id -> analysis result
         self.analysis_cache_time = {}  # article_id -> timestamp
-        self.analysis_cache_duration = 28800  # 8 hours (same as news cache)
+        self.analysis_cache_duration = 3600  # 1 HOUR (not 8!) - Fresh news every hour!
         
         # Last decision
         self.last_decision = None
@@ -145,33 +150,33 @@ class AIAutonomousStrategy:
         # Calculate P&L
         pnl_pct = (current_price - self.entry_price) / self.entry_price
         
-        # Stop loss hit
-        if pnl_pct <= -self.stop_loss_pct:
-            logger.warning(f"🛑 STOP LOSS HIT: {pnl_pct*100:.2f}%")
+        # Stop loss hit (using DYNAMIC stop loss!)
+        if pnl_pct <= -self.current_stop_loss:
+            logger.warning(f"🛑 STOP LOSS HIT: {pnl_pct*100:.2f}% (limit: -{self.current_stop_loss*100:.1f}%)")
             return {
                 'signal': 'SELL',
                 'confidence': 95,
                 'reasoning': f'Stop loss triggered at {pnl_pct*100:.2f}% loss',
                 'recommended_symbol': self.current_position,
                 'risk': {
-                    'stop_loss': self.entry_price * (1 - self.stop_loss_pct),
-                    'take_profit': self.entry_price * (1 + self.take_profit_pct),
+                    'stop_loss': self.entry_price * (1 - self.current_stop_loss),
+                    'take_profit': self.entry_price * (1 + self.current_take_profit),
                     'position_multiplier': 1.0,
                     'atr_value': 0
                 }
             }
         
-        # Take profit hit
-        if pnl_pct >= self.take_profit_pct:
-            logger.info(f"🎯 TAKE PROFIT HIT: {pnl_pct*100:.2f}%")
+        # Take profit hit (using DYNAMIC take profit!)
+        if pnl_pct >= self.current_take_profit:
+            logger.info(f"🎯 TAKE PROFIT HIT: {pnl_pct*100:.2f}% (target: +{self.current_take_profit*100:.1f}%)")
             return {
                 'signal': 'SELL',
                 'confidence': 95,
                 'reasoning': f'Take profit triggered at {pnl_pct*100:.2f}% gain',
                 'recommended_symbol': self.current_position,
                 'risk': {
-                    'stop_loss': self.entry_price * (1 - self.stop_loss_pct),
-                    'take_profit': self.entry_price * (1 + self.take_profit_pct),
+                    'stop_loss': self.entry_price * (1 - self.current_stop_loss),
+                    'take_profit': self.entry_price * (1 + self.current_take_profit),
                     'position_multiplier': 1.0,
                     'atr_value': 0
                 }
@@ -197,6 +202,67 @@ class AIAutonomousStrategy:
                 }
         
         return None
+    
+    def adjust_strategy_from_ai_analysis(self, ai_decision):
+        """
+        🎯 DYNAMIC STRATEGY ADJUSTMENT
+        
+        The AI analysis influences trading parameters!
+        Based on news sentiment, urgency, and risk level:
+        - Adjusts stop-loss and take-profit
+        - Changes confidence thresholds
+        - Modifies trading aggressiveness
+        """
+        if not ai_decision:
+            return
+        
+        sentiment = ai_decision.get('sentiment', 'neutral')
+        urgency = ai_decision.get('urgency', 'moderate')
+        risk_level = ai_decision.get('risk_level', 'medium')
+        confidence = ai_decision.get('confidence', 50)
+        
+        # 1. ADJUST STOP-LOSS & TAKE-PROFIT BASED ON RISK
+        if risk_level == 'high':
+            # High risk news = tighter stops, smaller profits
+            self.current_stop_loss = 0.02  # 2% stop (tighter)
+            self.current_take_profit = 0.03  # 3% profit (take early)
+            logger.info("🔴 HIGH RISK detected: Tighter stops (2%/-3%)")
+        elif risk_level == 'low':
+            # Low risk news = wider stops, bigger profits
+            self.current_stop_loss = 0.04  # 4% stop (wider)
+            self.current_take_profit = 0.08  # 8% profit (let it run)
+            logger.info("🟢 LOW RISK detected: Wider stops (4%/-8%)")
+        else:
+            # Medium risk = normal settings
+            self.current_stop_loss = self.stop_loss_pct
+            self.current_take_profit = self.take_profit_pct
+        
+        # 2. ADJUST CONFIDENCE THRESHOLD BASED ON URGENCY
+        if urgency == 'immediate':
+            # Breaking news = act fast, lower threshold
+            self.current_confidence_threshold = max(50, self.min_confidence - 10)
+            logger.info(f"⚡ URGENT news: Lower confidence threshold to {self.current_confidence_threshold}%")
+        elif urgency == 'high':
+            self.current_confidence_threshold = max(55, self.min_confidence - 5)
+            logger.info(f"🔥 High urgency: Confidence threshold at {self.current_confidence_threshold}%")
+        else:
+            # Normal urgency = normal threshold
+            self.current_confidence_threshold = self.min_confidence
+        
+        # 3. ADJUST HOLD TIME BASED ON SENTIMENT STRENGTH
+        if confidence >= 85 and sentiment in ['bullish', 'very bullish']:
+            # Very strong bullish signal = hold longer
+            self.max_hold_hours = 48
+            logger.info("🚀 Strong bullish signal: Extended hold time to 48h")
+        elif sentiment in ['bearish', 'very bearish'] and confidence >= 75:
+            # Strong bearish signal = shorter hold, exit quickly
+            self.max_hold_hours = 12
+            logger.info("📉 Strong bearish signal: Reduced hold time to 12h")
+        else:
+            self.max_hold_hours = 24  # Default
+        
+        # Log the adjusted strategy
+        logger.info(f"📊 Strategy adjusted: SL={self.current_stop_loss*100:.1f}% | TP={self.current_take_profit*100:.1f}% | Confidence={self.current_confidence_threshold}% | Hold={self.max_hold_hours}h")
     
     def generate_signal(self, data=None, symbol='BTCUSDT', current_price=None, force_fresh_news=False):
         """
@@ -340,6 +406,9 @@ class AIAutonomousStrategy:
             logger.info(f"   Recommended: {batch_result.get('recommended_symbol', 'N/A')}")
             logger.info(f"   Reasoning: {batch_result['reasoning'][:100]}...")
             
+            # 🎯 DYNAMICALLY ADJUST STRATEGY BASED ON AI ANALYSIS!
+            self.adjust_strategy_from_ai_analysis(batch_result)
+            
             # Track for dashboard
             self.sentiment_tracker.add_analysis(
                 article_title=f"Batch Analysis ({batch_result['articles_analyzed']} articles)",
@@ -352,9 +421,9 @@ class AIAutonomousStrategy:
             if self.is_symbol_valid(recommended_symbol):
                 logger.info(f"✅ {recommended_symbol} is tradeable on Binance")
                 
-                # Track trade decision if confidence is high enough
-                if batch_result['signal'] in ['BUY', 'SELL'] and batch_result['confidence'] >= self.min_confidence:
-                    logger.info(f"🎯 AI recommends {batch_result['signal']} {recommended_symbol} (confidence: {batch_result['confidence']}%)")
+                # Track trade decision if confidence is high enough (use DYNAMIC threshold!)
+                if batch_result['signal'] in ['BUY', 'SELL'] and batch_result['confidence'] >= self.current_confidence_threshold:
+                    logger.info(f"🎯 AI recommends {batch_result['signal']} {recommended_symbol} (confidence: {batch_result['confidence']}% >= {self.current_confidence_threshold}%)")
                     
                     return {
                         'signal': batch_result['signal'],
