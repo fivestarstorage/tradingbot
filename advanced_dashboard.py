@@ -50,9 +50,6 @@ class BotManager:
                 
                 # Add position details
                 bot['position'] = self.get_bot_position(bot['id'])
-                
-                # Add wallet information
-                bot['wallet'] = self.get_bot_wallet(bot['id'], bot['symbol'], bot['trade_amount'])
             
             # Save corrected statuses
             self.save_bots(bots)
@@ -156,67 +153,6 @@ class BotManager:
         except:
             return 'stopped'
     
-    def get_bot_wallet(self, bot_id, symbol, allocated_capital):
-        """Calculate bot's current wallet (USDT + crypto holdings)"""
-        try:
-            crypto_asset = symbol.replace('USDT', '').replace('BUSD', '')
-            
-            wallet = {
-                'usdt': 0.0,
-                'crypto_amount': 0.0,
-                'crypto_value': 0.0,
-                'crypto_symbol': crypto_asset,
-                'total_value': 0.0
-            }
-            
-            # Get account balance for this crypto
-            balance_info = self.client.get_account_balance(crypto_asset)
-            
-            if balance_info:
-                crypto_amount = float(balance_info.get('free', 0)) + float(balance_info.get('locked', 0))
-                
-                if crypto_amount > 0:
-                    # Get CURRENT PRICE from Binance (reliable)
-                    try:
-                        ticker = self.client.client.get_symbol_ticker(symbol=symbol)
-                        current_price = float(ticker['price'])
-                        crypto_value = crypto_amount * current_price
-                        
-                        wallet['crypto_amount'] = crypto_amount
-                        wallet['crypto_value'] = crypto_value
-                        wallet['usdt'] = 0.0
-                        wallet['total_value'] = crypto_value
-                        
-                        print(f"💰 {crypto_asset}: {crypto_amount:.8f} × ${current_price:.8f} = ${crypto_value:.2f}")
-                    except Exception as e:
-                        print(f"⚠️  Error fetching price for {symbol}: {e}")
-                        # If can't get price, use 0 value
-                        wallet['crypto_amount'] = crypto_amount
-                        wallet['crypto_value'] = 0.0
-                        wallet['total_value'] = 0.0
-                else:
-                    # No crypto holdings, all in USDT
-                    wallet['usdt'] = allocated_capital
-                    wallet['total_value'] = allocated_capital
-            else:
-                # Couldn't fetch balance, assume all USDT
-                wallet['usdt'] = allocated_capital
-                wallet['total_value'] = allocated_capital
-            
-            return wallet
-        except Exception as e:
-            print(f"❌ Error calculating bot wallet for {symbol}: {e}")
-            import traceback
-            traceback.print_exc()
-            # Return safe default
-            return {
-                'usdt': allocated_capital,
-                'crypto_amount': 0.0,
-                'crypto_value': 0.0,
-                'crypto_symbol': symbol.replace('USDT', '').replace('BUSD', ''),
-                'total_value': allocated_capital
-            }
-    
     def save_bots(self, bots):
         """Save bots to file"""
         with open(self.bots_file, 'w') as f:
@@ -311,42 +247,29 @@ class BotManager:
                 usdt_balance = self.client.get_account_balance('USDT')
                 available_usdt = usdt_balance['free'] if usdt_balance else 0
                 
-                print(f"\n💰 Available USDT for allocation: ${available_usdt:.2f}")
                 print(f"\n🤖 Auto-creating Ticker News Trading bots...")
-                print(f"   Each bot will: Monitor news hourly → AI analysis → Trade decisions")
-                
-                # Calculate even split of USDT across all coins (90% of available, 10% buffer)
-                num_coins = len(orphaned_coins)
-                default_allocation = (available_usdt * 0.9) / num_coins if num_coins > 0 else 0
-                default_allocation = round(default_allocation, 2)  # Round to 2 decimal places
-                
-                print(f"\n💡 Splitting {available_usdt * 0.9:.2f} USDT evenly across {num_coins} bot(s)")
-                print(f"   Each bot gets: ${default_allocation:.2f}")
-                print(f"   You can adjust allocations in the dashboard after creation\n")
-                
-                total_allocated = 0.0
+                print(f"   Each bot will: Monitor news every 15min → AI analysis → Trade decisions")
+                print(f"   Initial budget: $50 per bot (can adjust in dashboard)\n")
                 
                 for coin in orphaned_coins:
                     # Create a bot with Ticker News Trading strategy
                     bot_name = f"📰 {coin['asset']} News Trader"
                     
-                    # Use default allocation (can be changed in dashboard later)
-                    allocation = default_allocation
+                    # Simple: $50 per bot to start
+                    initial_amount = 50.0
                     
                     new_bot = self.add_bot(
                         name=bot_name,
                         symbol=coin['symbol'],
                         strategy='ticker_news',
-                        trade_amount=allocation
+                        trade_amount=initial_amount
                     )
-                    
-                    total_allocated += allocation
                     
                     print(f"   ✅ Created: {bot_name} (Bot #{new_bot['id']})")
                     print(f"      Symbol: {coin['symbol']}")
                     print(f"      Strategy: Ticker News Trading")
-                    print(f"      Allocated USDT: ${allocation:.2f}")
-                    print(f"      Purpose: Manage existing {coin['asset']} + buy more if needed")
+                    print(f"      Initial Amount: ${initial_amount:.2f}")
+                    print(f"      Managing: Existing {coin['asset']} holdings")
                     
                     # AUTO-START the bot immediately!
                     print(f"      🚀 Starting bot...")
@@ -360,13 +283,8 @@ class BotManager:
                     import time
                     time.sleep(2)
                 
-                print(f"\n💰 Total USDT Allocated: ${total_allocated:.2f}")
-                print(f"💰 Remaining USDT: ${available_usdt - total_allocated:.2f}")
-                print(f"\n💡 Note: Allocations were split evenly across all bots.")
-                print(f"   You can edit individual bot allocations in the dashboard.")
-                print(f"\n🚀 All auto-created bots have been STARTED automatically!")
-                print(f"   They are now monitoring news and managing positions.")
-                print(f"   Check dashboard to see them running: http://localhost:5001\n")
+                print(f"\n✅ All bots created and started!")
+                print(f"   Check dashboard: http://localhost:5001\n")
             else:
                 print("   ✅ All coins are already managed or have 0 balance\n")
         
@@ -589,15 +507,11 @@ def overview():
         bots = manager.get_bots()
         trades = manager.get_recent_trades(20)
         
-        # Calculate total allocated (count ALL bots, not just running ones)
-        total_allocated = sum(bot['trade_amount'] for bot in bots)
-        
         return jsonify({
             'success': True,
             'account': account,
             'bots': bots,
             'trades': trades,
-            'total_allocated': total_allocated,
             'timestamp': datetime.now().isoformat()
         })
     except Exception as e:
@@ -1607,22 +1521,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     All assets (USDT value)
                 </div>
             </div>
-            
-            <div class="summary-card">
-                <h3>🤖 Allocated to Bots</h3>
-                <div class="value" id="allocated">$0.00</div>
-                <div style="font-size: 0.75em; color: #888; margin-top: 8px;">
-                    Total capital across all bots
-                </div>
-            </div>
-            
-            <div class="summary-card" style="border: 2px solid #667eea;">
-                <h3>✨ Available for Allocation</h3>
-                <div class="value" id="available-allocation" style="color: #667eea;">$0.00</div>
-                <div style="font-size: 0.75em; color: #888; margin-top: 8px;">
-                    USDT you can allocate to new/existing bots
-                </div>
-            </div>
         </div>
         
         <!-- Asset Breakdown -->
@@ -1915,46 +1813,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div class="form-actions">
                 <button class="btn btn-secondary" onclick="hideEditBotModal()">Cancel</button>
                 <button class="btn" onclick="saveBot()">Save Changes</button>
-            </div>
-        </div>
-    </div>
-    
-    <!-- Add Funds Modal -->
-    <div class="modal" id="add-funds-modal">
-        <div class="modal-content">
-            <h2>💰 Add Funds to Bot</h2>
-            
-            <input type="hidden" id="add-funds-bot-id">
-            
-            <div class="form-group">
-                <label>Available USDT Balance</label>
-                <div id="available-usdt" style="font-size: 1.5em; font-weight: bold; color: #4caf50; margin: 10px 0;">
-                    Loading...
-                </div>
-            </div>
-            
-            <div class="form-group">
-                <label>Amount to Add (USDT)</label>
-                <input type="number" id="add-funds-amount" placeholder="Enter amount" min="1" step="0.01">
-                <small style="color: #888; display: block; margin-top: 5px;">
-                    This will increase the bot's total investment. The bot will use this additional capital on its next buy.
-                </small>
-            </div>
-            
-            <div class="form-group">
-                <label>Quick Add</label>
-                <div style="display: flex; gap: 10px; margin-top: 10px;">
-                    <button class="btn btn-sm btn-secondary" onclick="setAddAmount(10)">+$10</button>
-                    <button class="btn btn-sm btn-secondary" onclick="setAddAmount(25)">+$25</button>
-                    <button class="btn btn-sm btn-secondary" onclick="setAddAmount(50)">+$50</button>
-                    <button class="btn btn-sm btn-secondary" onclick="setAddAmount(100)">+$100</button>
-                    <button class="btn btn-sm btn-secondary" onclick="setAddAmountMax()">Max</button>
-                </div>
-            </div>
-            
-            <div class="form-actions">
-                <button class="btn btn-secondary" onclick="hideAddFundsModal()">Cancel</button>
-                <button class="btn" style="background: #4caf50;" onclick="addFunds()">Add Funds</button>
             </div>
         </div>
     </div>
@@ -2252,20 +2110,10 @@ tail -f /root/tradingbot/auto_update.log`);
                     currentData = result;
                     
                     // Update account info
-                    // Use usdt_available for "Available Balance" (USDT only, not all assets)
                     document.getElementById('available').textContent = '$' + result.account.usdt_available.toFixed(2);
                     document.getElementById('locked').textContent = '$' + result.account.usdt_locked.toFixed(2);
                     document.getElementById('total').textContent = '$' + result.account.total.toFixed(2);
-                    document.getElementById('allocated').textContent = '$' + result.total_allocated.toFixed(2);
                     document.getElementById('mode').textContent = result.account.mode;
-                    
-                    // Calculate and display available USDT for allocation
-                    // Use usdt_available from backend (already calculated)
-                    const availableForAllocation = Math.max(0, result.account.usdt_available - result.total_allocated);
-                    document.getElementById('available-allocation').textContent = '$' + availableForAllocation.toFixed(2);
-                    
-                    // Store for validation when adding bots
-                    window.availableUSDT = availableForAllocation;
                     
                     // Show error if present
                     if (result.account.error) {
@@ -2333,35 +2181,6 @@ tail -f /root/tradingbot/auto_update.log`);
                         <div>🎯 ${bot.strategy.replace('_', ' ').toUpperCase()}</div>
                     </div>
                     
-                    <!-- Bot Wallet -->
-                    <div style="background: #16161f; padding: 12px; border-radius: 6px; margin: 12px 0; border: 1px solid #2a2a3e;">
-                        <div style="font-weight: bold; color: #667eea; margin-bottom: 8px; font-size: 0.9em;">💰 BOT WALLET</div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.85em;">
-                            <div>
-                                <div style="color: #888;">Allocated:</div>
-                                <div style="font-weight: bold; color: #fff;">$${bot.trade_amount.toFixed(2)}</div>
-                            </div>
-                            <div>
-                                <div style="color: #888;">Current Value:</div>
-                                <div style="font-weight: bold; color: #4caf50;">$${((bot.wallet && bot.wallet.total_value) || bot.trade_amount).toFixed(2)}</div>
-                            </div>
-                        </div>
-                        ${bot.wallet ? `
-                            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #2a2a3e; font-size: 0.8em;">
-                                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                                    <span style="color: #888;">USDT:</span>
-                                    <span style="color: #fff;">${bot.wallet.usdt.toFixed(2)}</span>
-                                </div>
-                                ${bot.wallet.crypto_value > 0 ? `
-                                    <div style="display: flex; justify-content: space-between;">
-                                        <span style="color: #888;">${bot.wallet.crypto_symbol}:</span>
-                                        <span style="color: #fff;">${bot.wallet.crypto_amount.toFixed(8)} ($${bot.wallet.crypto_value.toFixed(2)})</span>
-                                    </div>
-                                ` : ''}
-                            </div>
-                        ` : ''}
-                    </div>
-                    
                     <div class="bot-stats">
                         <div class="bot-stat">
                             <div class="label">TRADES</div>
@@ -2420,7 +2239,6 @@ tail -f /root/tradingbot/auto_update.log`);
                             : `<button class="btn btn-sm btn-danger" onclick="stopBot(${bot.id})">⏹ Stop</button>`
                         }
                         <button class="btn btn-sm btn-secondary" onclick="editBot(${bot.id})">✏️ Edit</button>
-                        <button class="btn btn-sm" style="background: #4caf50;" onclick="showAddFundsModal(${bot.id})">💰 Add Funds</button>
                         <button class="btn btn-sm btn-danger" onclick="deleteBot(${bot.id})">🗑️</button>
                     </div>
                 </div>
@@ -2514,88 +2332,6 @@ tail -f /root/tradingbot/auto_update.log`);
         }
         
         // Show/hide add funds modal
-        function showAddFundsModal(botId) {
-            document.getElementById('add-funds-bot-id').value = botId;
-            document.getElementById('add-funds-amount').value = '';
-            document.getElementById('add-funds-modal').style.display = 'flex';
-            
-            // Fetch and display available USDT balance
-            fetch('/api/overview')
-                .then(response => response.json())
-                .then(result => {
-                    if (result.success) {
-                        document.getElementById('available-usdt').textContent = 
-                            '$' + result.account.available.toFixed(2);
-                    } else {
-                        document.getElementById('available-usdt').textContent = 'Error loading';
-                    }
-                })
-                .catch(error => {
-                    document.getElementById('available-usdt').textContent = 'Error loading';
-                });
-        }
-        
-        function hideAddFundsModal() {
-            document.getElementById('add-funds-modal').style.display = 'none';
-        }
-        
-        function setAddAmount(amount) {
-            document.getElementById('add-funds-amount').value = amount;
-        }
-        
-        function setAddAmountMax() {
-            // Get available balance from the displayed value
-            const availableText = document.getElementById('available-usdt').textContent;
-            const available = parseFloat(availableText.replace('$', '').replace(',', ''));
-            if (!isNaN(available)) {
-                document.getElementById('add-funds-amount').value = available.toFixed(2);
-            }
-        }
-        
-        function addFunds() {
-            const botId = parseInt(document.getElementById('add-funds-bot-id').value);
-            const amount = parseFloat(document.getElementById('add-funds-amount').value);
-            
-            if (!amount || amount <= 0) {
-                alert('Please enter a valid amount');
-                return;
-            }
-            
-            // Validate allocation doesn't exceed available USDT
-            if (window.availableUSDT !== undefined && amount > window.availableUSDT) {
-                alert(`❌ Insufficient USDT for allocation!
-
-Requested: $${amount.toFixed(2)}
-Available: $${window.availableUSDT.toFixed(2)}
-
-You can only allocate up to $${window.availableUSDT.toFixed(2)} USDT.`);
-                return;
-            }
-            
-            if (!confirm(`Add $${amount.toFixed(2)} to this bot?\n\nThis will increase the bot's total investment and it will use the additional capital on its next buy.`)) {
-                return;
-            }
-            
-            fetch(`/api/bot/${botId}/add_funds`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ amount: amount })
-            })
-            .then(response => response.json())
-            .then(result => {
-                if (result.success) {
-                    hideAddFundsModal();
-                    updateDashboard();
-                    alert(result.message);
-                } else {
-                    alert('Error: ' + result.error);
-                }
-            })
-            .catch(error => {
-                alert('Error adding funds: ' + error.message);
-            });
-        }
-        
         // Add bot
         function addBot() {
             const strategy = document.getElementById('bot-strategy').value;
@@ -2618,22 +2354,6 @@ You can only allocate up to $${window.availableUSDT.toFixed(2)} USDT.`);
             
             if (!data.name || !data.symbol || !data.trade_amount) {
                 alert('Please fill all fields');
-                return;
-            }
-            
-            // Validate allocation doesn't exceed available USDT
-            if (window.availableUSDT !== undefined && data.trade_amount > window.availableUSDT) {
-                alert(`❌ Insufficient USDT for allocation!
-
-Requested: $${data.trade_amount.toFixed(2)}
-Available: $${window.availableUSDT.toFixed(2)}
-
-You can only allocate up to $${window.availableUSDT.toFixed(2)} USDT.
-
-💡 Tip: 
-• Deposit more USDT to your account
-• Reduce other bot allocations
-• Or enter a lower amount`);
                 return;
             }
             
