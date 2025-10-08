@@ -3,7 +3,7 @@ Ticker-Based News Trading Strategy
 
 Each bot:
 - Tracks ONE specific ticker (BTC, ETH, SOL, etc.)
-- Fetches news for that ticker hourly from CryptoNews API
+- Fetches news for that ticker every 15 minutes from CryptoNews API
 - Uses AI to analyze news sentiment
 - Makes trading decisions based on news
 - Manages its own allocated capital independently
@@ -34,7 +34,7 @@ class TickerNewsStrategy:
         # News fetching
         self.news_api_key = os.getenv('CRYPTONEWS_API_KEY')
         self.last_news_fetch = None
-        self.news_fetch_interval = 3600  # 1 hour in seconds
+        self.news_fetch_interval = 900  # 15 minutes in seconds (matches bot check interval)
         self.cached_news = []
         self.cached_analysis = None
         
