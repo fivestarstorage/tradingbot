@@ -333,49 +333,16 @@ class BotRunner:
                 
                 # Determine how much to invest
                 if self.position:
-                    # ADDING TO EXISTING POSITION
-                    # Use the bot's ALLOCATED USDT (trade_amount), not account total
-                    # This is the bot's dedicated budget for adding to positions
-                    
-                    if not self.has_traded:
-                        # Bot has position (from auto-manager) but hasn't used its allocated USDT yet
-                        amount_to_invest = self.trade_amount
-                        required_balance = amount_to_invest * 1.01  # +1% for fees
-                        
-                        self.logger.info("=" * 70)
-                        self.logger.info("📈 ADDING TO EXISTING POSITION (First Buy)")
-                        self.logger.info(f"   Current entry: ${self.entry_price:.2f}")
-                        self.logger.info(f"   New buy price: ${current_price:.2f}")
-                        self.logger.info(f"   Bot's allocated USDT: ${self.trade_amount:.2f}")
-                        self.logger.info(f"   Account available: ${available_usdt:.2f}")
-                        self.logger.info(f"   Will invest: ${amount_to_invest:.2f} (ALL allocated USDT)")
-                        self.logger.info("=" * 70)
-                        
-                        if available_usdt < required_balance:
-                            self.logger.warning("=" * 70)
-                            self.logger.warning("⚠️  INSUFFICIENT USDT IN ACCOUNT")
-                            self.logger.warning("=" * 70)
-                            self.logger.warning(f"Bot's allocated USDT: ${amount_to_invest:.2f}")
-                            self.logger.warning(f"Required in account: ${required_balance:.2f} (includes 1% for fees)")
-                            self.logger.warning(f"Available in account: ${available_usdt:.2f}")
-                            self.logger.warning(f"Shortfall: ${required_balance - available_usdt:.2f}")
-                            self.logger.warning("")
-                            self.logger.warning("💡 Solution: Add more USDT to your Binance account")
-                            self.logger.warning("=" * 70)
-                            return False
-                        
-                        # Mark as traded so we don't use the allocation again
-                        self.has_traded = True
-                        self.initial_investment = amount_to_invest
-                    else:
-                        # Bot already used its allocated USDT, can't add more until after selling
-                        self.logger.warning("=" * 70)
-                        self.logger.warning("📊 Already used allocated USDT")
-                        self.logger.warning(f"   Bot's allocation: ${self.trade_amount:.2f}")
-                        self.logger.warning(f"   Already spent: YES")
-                        self.logger.warning(f"   Can't add to position (budget exhausted)")
-                        self.logger.warning("=" * 70)
-                        return False
+                    # Already holding crypto - ignore BUY signals
+                    # Bot can only SELL, then buy again with proceeds
+                    self.logger.info("=" * 70)
+                    self.logger.info("📊 Already holding position - ignoring BUY signal")
+                    self.logger.info(f"   Current position: {self.symbol}")
+                    self.logger.info(f"   Entry: ${self.entry_price:.2f}")
+                    self.logger.info(f"   Current: ${current_price:.2f}")
+                    self.logger.info(f"   Action: Waiting for SELL signal")
+                    self.logger.info("=" * 70)
+                    return False
                 
                 elif not self.has_traded:
                     # FIRST TRADE: Use trade_amount as initial investment
