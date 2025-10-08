@@ -159,82 +159,61 @@ class BotManager:
     def get_bot_wallet(self, bot_id, symbol, allocated_capital):
         """Calculate bot's current wallet (USDT + crypto holdings)"""
         try:
+            crypto_asset = symbol.replace('USDT', '').replace('BUSD', '')
+            
             wallet = {
                 'usdt': 0.0,
                 'crypto_amount': 0.0,
                 'crypto_value': 0.0,
-                'crypto_symbol': symbol.replace('USDT', ''),
-                'total_value': allocated_capital
+                'crypto_symbol': crypto_asset,
+                'total_value': 0.0
             }
             
-            # Load position file to see current holdings
-            position_file = f"bot_{bot_id}_position.json"
+            # Get account balance for this crypto
+            balance_info = self.client.get_account_balance(crypto_asset)
             
-            if os.path.exists(position_file):
-                try:
-                    with open(position_file, 'r') as f:
-                        pos_data = json.load(f)
-                    
-                    # If bot has active position, it's holding crypto
-                    if pos_data.get('symbol'):
-                        # Get current price
-                        try:
-                            ticker = self.client.client.get_symbol_ticker(symbol=pos_data['symbol'])
-                            current_price = float(ticker['price'])
-                            
-                            # Sanity check: If price seems way off from entry price, log warning
-                            entry_price = pos_data.get('entry_price', 0)
-                            if entry_price > 0:
-                                price_ratio = current_price / entry_price
-                                if price_ratio > 10 or price_ratio < 0.1:  # More than 10x change
-                                    print(f"⚠️  Warning: {symbol} price seems off!")
-                                    print(f"   Current: ${current_price:.8f}")
-                                    print(f"   Entry: ${entry_price:.8f}")
-                                    print(f"   Ratio: {price_ratio:.2f}x")
-                                    # Use entry price as fallback if current seems wrong
-                                    current_price = entry_price
-                        except Exception as e:
-                            print(f"⚠️  Error fetching price for {symbol}: {e}")
-                            current_price = pos_data.get('entry_price', 0)
+            if balance_info:
+                crypto_amount = float(balance_info.get('free', 0)) + float(balance_info.get('locked', 0))
+                
+                if crypto_amount > 0:
+                    # Get CURRENT PRICE from Binance (reliable)
+                    try:
+                        ticker = self.client.client.get_symbol_ticker(symbol=symbol)
+                        current_price = float(ticker['price'])
+                        crypto_value = crypto_amount * current_price
                         
-                        # Get account balance for this crypto
-                        crypto_asset = symbol.replace('USDT', '')
-                        balance_info = self.client.get_account_balance(crypto_asset)
+                        wallet['crypto_amount'] = crypto_amount
+                        wallet['crypto_value'] = crypto_value
+                        wallet['usdt'] = 0.0
+                        wallet['total_value'] = crypto_value
                         
-                        if balance_info:
-                            crypto_amount = float(balance_info.get('free', 0))
-                            crypto_value = crypto_amount * current_price
-                            
-                            wallet['crypto_amount'] = crypto_amount
-                            wallet['crypto_value'] = crypto_value
-                            wallet['usdt'] = 0.0  # All in crypto
-                            wallet['total_value'] = crypto_value
-                        else:
-                            # Fallback: no position, all USDT
-                            wallet['usdt'] = allocated_capital
-                            wallet['total_value'] = allocated_capital
-                    else:
-                        # No position, all in USDT
-                        wallet['usdt'] = allocated_capital
-                        wallet['total_value'] = allocated_capital
-                except:
-                    # Couldn't read position file, assume all USDT
+                        print(f"💰 {crypto_asset}: {crypto_amount:.8f} × ${current_price:.8f} = ${crypto_value:.2f}")
+                    except Exception as e:
+                        print(f"⚠️  Error fetching price for {symbol}: {e}")
+                        # If can't get price, use 0 value
+                        wallet['crypto_amount'] = crypto_amount
+                        wallet['crypto_value'] = 0.0
+                        wallet['total_value'] = 0.0
+                else:
+                    # No crypto holdings, all in USDT
                     wallet['usdt'] = allocated_capital
                     wallet['total_value'] = allocated_capital
             else:
-                # No position file, bot hasn't traded yet, all USDT
+                # Couldn't fetch balance, assume all USDT
                 wallet['usdt'] = allocated_capital
                 wallet['total_value'] = allocated_capital
             
             return wallet
         except Exception as e:
-            print(f"Error calculating bot wallet: {e}")
-            # Return allocated capital as default
+            print(f"❌ Error calculating bot wallet for {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
+            # Return safe default
             return {
                 'usdt': allocated_capital,
                 'crypto_amount': 0.0,
                 'crypto_value': 0.0,
-                'crypto_symbol': symbol.replace('USDT', ''),
+                'crypto_symbol': symbol.replace('USDT', '').replace('BUSD', ''),
                 'total_value': allocated_capital
             }
     
@@ -336,8 +315,15 @@ class BotManager:
                 print(f"\n🤖 Auto-creating Ticker News Trading bots...")
                 print(f"   Each bot will: Monitor news hourly → AI analysis → Trade decisions")
                 
-                # Calculate default allocation per coin (or use minimum)
-                default_allocation = 100.0  # Default $100 per coin
+                # Calculate even split of USDT across all coins (90% of available, 10% buffer)
+                num_coins = len(orphaned_coins)
+                default_allocation = (available_usdt * 0.9) / num_coins if num_coins > 0 else 0
+                default_allocation = round(default_allocation, 2)  # Round to 2 decimal places
+                
+                print(f"\n💡 Splitting {available_usdt * 0.9:.2f} USDT evenly across {num_coins} bot(s)")
+                print(f"   Each bot gets: ${default_allocation:.2f}")
+                print(f"   You can adjust allocations in the dashboard after creation\n")
+                
                 total_allocated = 0.0
                 
                 for coin in orphaned_coins:
@@ -376,6 +362,8 @@ class BotManager:
                 
                 print(f"\n💰 Total USDT Allocated: ${total_allocated:.2f}")
                 print(f"💰 Remaining USDT: ${available_usdt - total_allocated:.2f}")
+                print(f"\n💡 Note: Allocations were split evenly across all bots.")
+                print(f"   You can edit individual bot allocations in the dashboard.")
                 print(f"\n🚀 All auto-created bots have been STARTED automatically!")
                 print(f"   They are now monitoring news and managing positions.")
                 print(f"   Check dashboard to see them running: http://localhost:5001\n")
