@@ -311,46 +311,57 @@ class AIAutonomousStrategy:
                 )
                 
                 if articles:
-                    for article in articles[:5]:  # Check recent articles
-                        article_id = article.get('id', article['url'])
+                    # Use BATCH ANALYSIS with caching for position management too!
+                    cache_key = f"position_{self.current_position}_" + "_".join([a.get('title', '')[:20] for a in articles[:3]])
+                    
+                    if cache_key in self.ai_analysis_cache:
+                        cache_time = self.analysis_cache_time.get(cache_key, 0)
+                        time_since_analysis = datetime.now().timestamp() - cache_time
                         
-                        # CHECK AI ANALYSIS CACHE FIRST
-                        from datetime import datetime
-                        now = datetime.now()
-                        
-                        if article_id in self.ai_analysis_cache and article_id in self.analysis_cache_time:
-                            cache_age = (now - self.analysis_cache_time[article_id]).total_seconds()
-                            if cache_age < self.analysis_cache_duration:
-                                analysis = self.ai_analysis_cache[article_id]
-                            else:
-                                analysis = self.ai_analyzer.analyze_news(article)
-                                self.ai_analysis_cache[article_id] = analysis
-                                self.analysis_cache_time[article_id] = now
+                        if time_since_analysis < self.analysis_cache_duration:
+                            # Use cached AI analysis!
+                            position_analysis = self.ai_analysis_cache[cache_key]
+                            logger.info(f"💾 Using cached position analysis ({int(self.analysis_cache_duration - time_since_analysis)}s until refresh)")
                         else:
-                            analysis = self.ai_analyzer.analyze_news(article)
-                            self.ai_analysis_cache[article_id] = analysis
-                            self.analysis_cache_time[article_id] = now
-                        
-                        # If negative news with high confidence, sell
-                        if analysis['signal'] == 'SELL' and analysis['confidence'] >= 75:
-                            logger.warning(f"📉 Negative news detected for {self.current_position}!")
-                            return {
-                                'signal': 'SELL',
-                                'confidence': analysis['confidence'],
-                                'reasoning': f"Negative news: {analysis['reasoning']}",
-                                'recommended_symbol': self.current_position,
-                                'indicators': {
-                                    'news_headline': article['title'],
-                                    'sentiment': analysis['sentiment'],
-                                    'impact': analysis['impact']
-                                },
-                                'risk': {
-                                    'stop_loss': self.entry_price * (1 - self.stop_loss_pct),
-                                    'take_profit': self.entry_price * (1 + self.take_profit_pct),
-                                    'position_multiplier': 1.0,
-                                    'atr_value': 0
-                                }
+                            # Cache expired, analyze fresh
+                            logger.info(f"🤖 Analyzing {len(articles[:3])} articles for {self.current_position}...")
+                            position_analysis = self.ai_analyzer.batch_analyze_comprehensive(
+                                articles=articles,
+                                max_articles=3  # Just check top 3 for positions
+                            )
+                            # Update cache
+                            self.ai_analysis_cache[cache_key] = position_analysis
+                            self.analysis_cache_time[cache_key] = datetime.now().timestamp()
+                    else:
+                        # No cache, analyze fresh
+                        logger.info(f"🤖 Analyzing {len(articles[:3])} articles for {self.current_position}...")
+                        position_analysis = self.ai_analyzer.batch_analyze_comprehensive(
+                            articles=articles,
+                            max_articles=3  # Just check top 3 for positions
+                        )
+                        # Cache the result
+                        self.ai_analysis_cache[cache_key] = position_analysis
+                        self.analysis_cache_time[cache_key] = datetime.now().timestamp()
+                    
+                    # If negative news with high confidence, sell
+                    if position_analysis['signal'] == 'SELL' and position_analysis['confidence'] >= 75:
+                        logger.warning(f"📉 Negative news detected for {self.current_position}!")
+                        return {
+                            'signal': 'SELL',
+                            'confidence': position_analysis['confidence'],
+                            'reasoning': f"Negative news: {position_analysis['reasoning']}",
+                            'recommended_symbol': self.current_position,
+                            'indicators': {
+                                'sentiment': position_analysis['sentiment'],
+                                'impact': position_analysis['impact']
+                            },
+                            'risk': {
+                                'stop_loss': self.entry_price * (1 - self.current_stop_loss),
+                                'take_profit': self.entry_price * (1 + self.current_take_profit),
+                                'position_multiplier': 1.0,
+                                'atr_value': 0
                             }
+                        }
                 
                 # Position OK, no action needed
                 pnl_pct = ((current_price - self.entry_price) / self.entry_price * 100) if current_price else 0
@@ -392,13 +403,41 @@ class AIAutonomousStrategy:
                 }
             
             logger.info(f"📰 Found {len(articles)} articles")
-            logger.info(f"🤖 Sending {min(len(articles), self.max_articles_per_cycle)} articles to AI in ONE batch analysis...")
             
-            # BATCH ANALYSIS: Analyze ALL articles in ONE OpenAI call
-            batch_result = self.ai_analyzer.batch_analyze_comprehensive(
-                articles=articles,
-                max_articles=self.max_articles_per_cycle
-            )
+            # CHECK AI ANALYSIS CACHE FIRST!
+            # Create cache key from first few article titles (represents this batch)
+            cache_key = "_".join([a.get('title', '')[:30] for a in articles[:5]])
+            
+            # Check if we've analyzed this batch recently
+            if cache_key in self.ai_analysis_cache:
+                cache_time = self.analysis_cache_time.get(cache_key, 0)
+                time_since_analysis = datetime.now().timestamp() - cache_time
+                
+                if time_since_analysis < self.analysis_cache_duration:
+                    # Use cached AI analysis!
+                    batch_result = self.ai_analysis_cache[cache_key]
+                    logger.info(f"💾 Using cached AI analysis ({int(self.analysis_cache_duration - time_since_analysis)}s until refresh)")
+                    logger.info(f"   Saved OpenAI API call! Last analyzed {int(time_since_analysis)}s ago")
+                else:
+                    # Cache expired, analyze fresh
+                    logger.info(f"🤖 Sending {min(len(articles), self.max_articles_per_cycle)} articles to AI in ONE batch analysis...")
+                    batch_result = self.ai_analyzer.batch_analyze_comprehensive(
+                        articles=articles,
+                        max_articles=self.max_articles_per_cycle
+                    )
+                    # Update cache
+                    self.ai_analysis_cache[cache_key] = batch_result
+                    self.analysis_cache_time[cache_key] = datetime.now().timestamp()
+            else:
+                # No cache, analyze fresh
+                logger.info(f"🤖 Sending {min(len(articles), self.max_articles_per_cycle)} articles to AI in ONE batch analysis...")
+                batch_result = self.ai_analyzer.batch_analyze_comprehensive(
+                    articles=articles,
+                    max_articles=self.max_articles_per_cycle
+                )
+                # Cache the result
+                self.ai_analysis_cache[cache_key] = batch_result
+                self.analysis_cache_time[cache_key] = datetime.now().timestamp()
             
             logger.info(f"✅ Batch analysis complete:")
             logger.info(f"   Signal: {batch_result['signal']}")
