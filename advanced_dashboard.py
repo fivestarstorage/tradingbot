@@ -50,6 +50,9 @@ class BotManager:
                 
                 # Add position details
                 bot['position'] = self.get_bot_position(bot['id'])
+                
+                # Add wallet information
+                bot['wallet'] = self.get_bot_wallet(bot['id'], bot['symbol'], bot['trade_amount'])
             
             # Save corrected statuses
             self.save_bots(bots)
@@ -152,6 +155,75 @@ class BotManager:
                 return 'stopped'
         except:
             return 'stopped'
+    
+    def get_bot_wallet(self, bot_id, symbol, allocated_capital):
+        """Calculate bot's current wallet (USDT + crypto holdings)"""
+        try:
+            wallet = {
+                'usdt': 0.0,
+                'crypto_amount': 0.0,
+                'crypto_value': 0.0,
+                'crypto_symbol': symbol.replace('USDT', ''),
+                'total_value': allocated_capital
+            }
+            
+            # Load position file to see current holdings
+            position_file = f"bot_{bot_id}_position.json"
+            
+            if os.path.exists(position_file):
+                try:
+                    with open(position_file, 'r') as f:
+                        pos_data = json.load(f)
+                    
+                    # If bot has active position, it's holding crypto
+                    if pos_data.get('symbol'):
+                        # Get current price
+                        try:
+                            ticker = self.client.client.get_symbol_ticker(symbol=pos_data['symbol'])
+                            current_price = float(ticker['price'])
+                        except:
+                            current_price = pos_data.get('entry_price', 0)
+                        
+                        # Get account balance for this crypto
+                        crypto_asset = symbol.replace('USDT', '')
+                        balance_info = self.client.get_account_balance(crypto_asset)
+                        
+                        if balance_info:
+                            crypto_amount = float(balance_info.get('free', 0))
+                            crypto_value = crypto_amount * current_price
+                            
+                            wallet['crypto_amount'] = crypto_amount
+                            wallet['crypto_value'] = crypto_value
+                            wallet['usdt'] = 0.0  # All in crypto
+                            wallet['total_value'] = crypto_value
+                        else:
+                            # Fallback: no position, all USDT
+                            wallet['usdt'] = allocated_capital
+                            wallet['total_value'] = allocated_capital
+                    else:
+                        # No position, all in USDT
+                        wallet['usdt'] = allocated_capital
+                        wallet['total_value'] = allocated_capital
+                except:
+                    # Couldn't read position file, assume all USDT
+                    wallet['usdt'] = allocated_capital
+                    wallet['total_value'] = allocated_capital
+            else:
+                # No position file, bot hasn't traded yet, all USDT
+                wallet['usdt'] = allocated_capital
+                wallet['total_value'] = allocated_capital
+            
+            return wallet
+        except Exception as e:
+            print(f"Error calculating bot wallet: {e}")
+            # Return allocated capital as default
+            return {
+                'usdt': allocated_capital,
+                'crypto_amount': 0.0,
+                'crypto_value': 0.0,
+                'crypto_symbol': symbol.replace('USDT', ''),
+                'total_value': allocated_capital
+            }
     
     def save_bots(self, bots):
         """Save bots to file"""
@@ -1670,10 +1742,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
             
             <div class="form-group">
-                <label>Trade Amount (USDT) <span style="color: #888; font-size: 0.85em;">- Money to spend per trade</span></label>
-                <input type="number" id="bot-amount" placeholder="100" value="100">
+                <label>Allocated Capital (USDT) <span style="color: #888; font-size: 0.85em;">- Total USDT to give this bot</span></label>
+                <input type="number" id="bot-amount" placeholder="200" value="200">
                 <div style="color: #888; font-size: 0.8em; margin-top: 5px;">
-                    Example: $100 = Bot spends $100 each time it buys crypto
+                    💡 This is the total USDT pool this bot will manage and trade with.<br>
+                    Example: $200 = Bot gets $200 USDT to use for all its trades.
                 </div>
             </div>
             
@@ -1697,8 +1770,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
             
             <div class="form-group">
-                <label>Trade Amount (USDT)</label>
+                <label>Allocated Capital (USDT)</label>
                 <input type="number" id="edit-bot-amount">
+                <div style="color: #888; font-size: 0.8em; margin-top: 5px;">
+                    Total USDT this bot manages
+                </div>
             </div>
             
             <div class="form-actions">
@@ -2084,7 +2160,35 @@ tail -f /root/tradingbot/auto_update.log`);
                     <div class="bot-info">
                         <div>📈 ${bot.symbol}</div>
                         <div>🎯 ${bot.strategy.replace('_', ' ').toUpperCase()}</div>
-                        <div>💵 $${bot.trade_amount} per trade</div>
+                    </div>
+                    
+                    <!-- Bot Wallet -->
+                    <div style="background: #16161f; padding: 12px; border-radius: 6px; margin: 12px 0; border: 1px solid #2a2a3e;">
+                        <div style="font-weight: bold; color: #667eea; margin-bottom: 8px; font-size: 0.9em;">💰 BOT WALLET</div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.85em;">
+                            <div>
+                                <div style="color: #888;">Allocated:</div>
+                                <div style="font-weight: bold; color: #fff;">$${bot.trade_amount.toFixed(2)}</div>
+                            </div>
+                            <div>
+                                <div style="color: #888;">Current Value:</div>
+                                <div style="font-weight: bold; color: #4caf50;">$${((bot.wallet && bot.wallet.total_value) || bot.trade_amount).toFixed(2)}</div>
+                            </div>
+                        </div>
+                        ${bot.wallet ? `
+                            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #2a2a3e; font-size: 0.8em;">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                                    <span style="color: #888;">USDT:</span>
+                                    <span style="color: #fff;">${bot.wallet.usdt.toFixed(2)}</span>
+                                </div>
+                                ${bot.wallet.crypto_value > 0 ? `
+                                    <div style="display: flex; justify-content: space-between;">
+                                        <span style="color: #888;">${bot.wallet.crypto_symbol}:</span>
+                                        <span style="color: #fff;">${bot.wallet.crypto_amount.toFixed(8)} ($${bot.wallet.crypto_value.toFixed(2)})</span>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        ` : ''}
                     </div>
                     
                     <div class="bot-stats">
@@ -2093,9 +2197,15 @@ tail -f /root/tradingbot/auto_update.log`);
                             <div class="value">${bot.trades}</div>
                         </div>
                         <div class="bot-stat">
-                            <div class="label">PROFIT</div>
+                            <div class="label">P&L</div>
                             <div class="value" style="color: ${bot.profit >= 0 ? '#4caf50' : '#f44336'}">
                                 ${bot.profit >= 0 ? '+' : ''}$${bot.profit.toFixed(2)}
+                            </div>
+                        </div>
+                        <div class="bot-stat">
+                            <div class="label">ROI</div>
+                            <div class="value" style="color: ${bot.profit >= 0 ? '#4caf50' : '#f44336'}">
+                                ${bot.trade_amount > 0 ? ((bot.profit / bot.trade_amount) * 100).toFixed(1) : '0.0'}%
                             </div>
                         </div>
                     </div>
