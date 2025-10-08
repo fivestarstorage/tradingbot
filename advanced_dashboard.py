@@ -424,10 +424,22 @@ class BotManager:
             # Sort by value (highest first)
             balances_list.sort(key=lambda x: x['value_usdt'], reverse=True)
             
+            # Get USDT balance specifically
+            usdt_free = 0.0
+            usdt_locked = 0.0
+            for bal in balances_list:
+                if bal['asset'] == 'USDT':
+                    usdt_free = bal['free']
+                    usdt_locked = bal['locked']
+                    break
+            
             return {
-                'available': total_value_usdt - total_locked_usdt,
-                'locked': total_locked_usdt,
-                'total': total_value_usdt,
+                'available': total_value_usdt - total_locked_usdt,  # Total of all assets
+                'locked': total_locked_usdt,  # Total locked in orders
+                'total': total_value_usdt,  # Total of all assets
+                'usdt_available': usdt_free,  # USDT only (not locked)
+                'usdt_locked': usdt_locked,  # USDT locked in orders
+                'usdt_total': usdt_free + usdt_locked,  # Total USDT
                 'mode': 'TESTNET' if Config.USE_TESTNET else 'MAINNET',
                 'balances': balances_list[:10]  # Top 10 assets
             }
@@ -438,6 +450,9 @@ class BotManager:
                 'available': 0,
                 'locked': 0,
                 'total': 0,
+                'usdt_available': 0,
+                'usdt_locked': 0,
+                'usdt_total': 0,
                 'mode': 'TESTNET' if Config.USE_TESTNET else 'MAINNET',
                 'balances': [],
                 'error': str(e)
@@ -562,8 +577,8 @@ def overview():
         bots = manager.get_bots()
         trades = manager.get_recent_trades(20)
         
-        # Calculate total allocated
-        total_allocated = sum(bot['trade_amount'] for bot in bots if bot['status'] == 'running')
+        # Calculate total allocated (count ALL bots, not just running ones)
+        total_allocated = sum(bot['trade_amount'] for bot in bots)
         
         return jsonify({
             'success': True,
@@ -1554,21 +1569,33 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <div class="summary-card">
                 <h3>💰 Available Balance</h3>
                 <div class="value" id="available">Loading...</div>
+                <div style="font-size: 0.75em; color: #888; margin-top: 8px;">
+                    USDT not in orders
+                </div>
             </div>
             
             <div class="summary-card">
                 <h3>🔒 In Orders</h3>
                 <div class="value" id="locked">Loading...</div>
+                <div style="font-size: 0.75em; color: #888; margin-top: 8px;">
+                    USDT locked in orders
+                </div>
             </div>
             
             <div class="summary-card">
                 <h3>💵 Total Balance</h3>
                 <div class="value" id="total">Loading...</div>
+                <div style="font-size: 0.75em; color: #888; margin-top: 8px;">
+                    All assets (USDT value)
+                </div>
             </div>
             
             <div class="summary-card">
                 <h3>🤖 Allocated to Bots</h3>
                 <div class="value" id="allocated">$0.00</div>
+                <div style="font-size: 0.75em; color: #888; margin-top: 8px;">
+                    Total capital across all bots
+                </div>
             </div>
             
             <div class="summary-card" style="border: 2px solid #667eea;">
@@ -2207,21 +2234,16 @@ tail -f /root/tradingbot/auto_update.log`);
                     currentData = result;
                     
                     // Update account info
-                    document.getElementById('available').textContent = '$' + result.account.available.toFixed(2);
-                    document.getElementById('locked').textContent = '$' + result.account.locked.toFixed(2);
+                    // Use usdt_available for "Available Balance" (USDT only, not all assets)
+                    document.getElementById('available').textContent = '$' + result.account.usdt_available.toFixed(2);
+                    document.getElementById('locked').textContent = '$' + result.account.usdt_locked.toFixed(2);
                     document.getElementById('total').textContent = '$' + result.account.total.toFixed(2);
                     document.getElementById('allocated').textContent = '$' + result.total_allocated.toFixed(2);
                     document.getElementById('mode').textContent = result.account.mode;
                     
                     // Calculate and display available USDT for allocation
-                    // Get USDT balance from balances array
-                    let usdtBalance = 0;
-                    const usdtAsset = result.account.balances.find(b => b.asset === 'USDT');
-                    if (usdtAsset) {
-                        usdtBalance = usdtAsset.free; // Use 'free' balance (not locked in orders)
-                    }
-                    
-                    const availableForAllocation = Math.max(0, usdtBalance - result.total_allocated);
+                    // Use usdt_available from backend (already calculated)
+                    const availableForAllocation = Math.max(0, result.account.usdt_available - result.total_allocated);
                     document.getElementById('available-allocation').textContent = '$' + availableForAllocation.toFixed(2);
                     
                     // Store for validation when adding bots
