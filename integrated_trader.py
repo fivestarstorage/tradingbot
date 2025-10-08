@@ -134,6 +134,11 @@ class BotRunner:
                             for addition in capital_additions[-3:]:  # Show last 3
                                 self.logger.info(f"      + ${addition['amount']:.2f} on {addition['timestamp'][:10]}")
                     self.logger.info("=" * 70)
+                    
+                    # CRITICAL: Tell the strategy about the loaded position!
+                    if self.position == 'long' and hasattr(self.strategy, 'set_position'):
+                        self.strategy.set_position(self.symbol, self.entry_price)
+                        self.logger.info("✅ Informed strategy about existing position")
         except Exception as e:
             self.logger.error(f"Error loading position: {e}")
     
@@ -307,7 +312,7 @@ class BotRunner:
     def execute_trade(self, signal, current_price, signal_data=None):
         """Execute buy/sell orders"""
         try:
-            if signal == 'BUY' and not self.position:
+            if signal == 'BUY':
                 # Check USDT balance first
                 try:
                     usdt_balance = self.client.get_account_balance('USDT')
@@ -315,6 +320,25 @@ class BotRunner:
                 except Exception as e:
                     self.logger.error(f"Error checking balance: {e}")
                     available_usdt = 0
+                
+                # Check if we have enough USDT to buy
+                min_trade = 10  # Minimum $10 per trade
+                if available_usdt < min_trade:
+                    self.logger.warning("=" * 70)
+                    self.logger.warning(f"⚠️  Cannot BUY: Insufficient USDT")
+                    self.logger.warning(f"   Available: ${available_usdt:.2f}")
+                    self.logger.warning(f"   Minimum needed: ${min_trade}")
+                    self.logger.warning("=" * 70)
+                    return False
+                
+                # If we already have a position, this will ADD to it
+                if self.position:
+                    self.logger.info("=" * 70)
+                    self.logger.info("📈 ADDING TO EXISTING POSITION")
+                    self.logger.info(f"   Current entry: ${self.entry_price:.2f}")
+                    self.logger.info(f"   New buy price: ${current_price:.2f}")
+                    self.logger.info(f"   Available USDT: ${available_usdt:.2f}")
+                    self.logger.info("=" * 70)
                 
                 # Determine how much to invest
                 if not self.has_traded:
@@ -381,17 +405,44 @@ class BotRunner:
                 )
                 
                 if order:
+                    # If adding to position, calculate weighted average entry price
+                    if self.position == 'LONG' and self.entry_price:
+                        # Get current holdings
+                        try:
+                            asset = self.symbol.replace('USDT', '')
+                            balance = self.client.get_account_balance(asset)
+                            if balance:
+                                old_quantity = float(balance['free']) - quantity  # Holdings before this buy
+                                if old_quantity > 0:
+                                    # Calculate weighted average
+                                    old_value = old_quantity * self.entry_price
+                                    new_value = quantity * current_price
+                                    total_value = old_value + new_value
+                                    total_quantity = old_quantity + quantity
+                                    new_avg_entry = total_value / total_quantity
+                                    
+                                    self.logger.info("📊 Position Updated:")
+                                    self.logger.info(f"   Old Entry: ${self.entry_price:.2f}")
+                                    self.logger.info(f"   New Entry: ${new_avg_entry:.2f} (weighted average)")
+                                    
+                                    self.entry_price = new_avg_entry
+                        except Exception as e:
+                            self.logger.warning(f"Could not calculate weighted average: {e}")
+                            # Keep using old entry price
+                    else:
+                        # First position
+                        self.entry_price = current_price
+                    
                     self.position = 'LONG'
-                    self.entry_price = current_price
-                    self.stop_loss = current_price * 0.98  # 2% stop loss
-                    self.take_profit = current_price * 1.03  # 3% take profit
+                    self.stop_loss = self.entry_price * 0.98  # 2% stop loss from avg entry
+                    self.take_profit = self.entry_price * 1.03  # 3% take profit from avg entry
                     
                     # SAVE POSITION TO FILE (persists across restarts!)
                     self._save_position()
                     
                     # Notify strategy about position (for AI strategies)
                     if hasattr(self.strategy, 'set_position'):
-                        self.strategy.set_position(self.symbol, current_price)
+                        self.strategy.set_position(self.symbol, self.entry_price)
                     
                     # Track trade decision for dashboard
                     if hasattr(self.strategy, 'sentiment_tracker'):
