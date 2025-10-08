@@ -3,6 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <!-- Cache Busting: Force browser to always fetch fresh content -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    
     <title>Trading Management Dashboard</title>
     <style>
         * {
@@ -54,6 +60,17 @@
             padding: 20px;
             border-radius: 10px;
             border: 1px solid #2a2a3e;
+        }
+        
+        .summary-card.clickable {
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .summary-card.clickable:hover {
+            transform: translateY(-2px);
+            border-color: #667eea;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
         }
         
         .summary-card h3 {
@@ -209,6 +226,55 @@
             font-weight: bold;
         }
         
+        .position-panel {
+            background: linear-gradient(135deg, #1a1a2e 0%, #0f0f1e 100%);
+            border: 1px solid #2a2a3e;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        
+        .position-header {
+            font-weight: bold;
+            color: #4caf50;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .position-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            font-size: 0.9em;
+        }
+        
+        .position-detail {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+        }
+        
+        .position-detail .label {
+            color: #888;
+        }
+        
+        .position-detail .value {
+            font-weight: bold;
+            color: #fff;
+        }
+        
+        .ai-reasoning {
+            margin-top: 10px;
+            padding: 10px;
+            background: rgba(76, 175, 80, 0.1);
+            border-left: 3px solid #4caf50;
+            border-radius: 4px;
+            font-size: 0.85em;
+            color: #aaa;
+        }
+        
         .bot-controls {
             display: flex;
             gap: 10px;
@@ -314,6 +380,44 @@
             background: #667eea;
             border-radius: 4px;
         }
+        
+        .tabs {
+            display: flex;
+            gap: 5px;
+            background: #16161f;
+            padding: 10px 20px 0 20px;
+            border-bottom: 2px solid #2a2a3e;
+        }
+        
+        .tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            border-radius: 8px 8px 0 0;
+            background: #1e1e2e;
+            color: #888;
+            border: none;
+            font-size: 1em;
+            transition: all 0.2s;
+        }
+        
+        .tab:hover {
+            background: #252535;
+            color: #fff;
+        }
+        
+        .tab.active {
+            background: #0d0d17;
+            color: #667eea;
+            font-weight: bold;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
     </style>
 </head>
 <body>
@@ -322,27 +426,56 @@
         <div class="mode-badge" id="mode">Loading...</div>
     </div>
     
+    <!-- Tab Navigation -->
+    <div class="tabs">
+        <button class="tab active" onclick="switchTab('overview')">📊 Overview</button>
+        <button class="tab" onclick="switchTab('logs')">📋 Logs</button>
+        <button class="tab" onclick="switchTab('system')">⚙️ System</button>
+    </div>
+    
     <div class="container">
+        <!-- Overview Tab Content -->
+        <div id="overview-tab" class="tab-content active">
         <!-- Account Summary -->
         <div class="account-summary">
             <div class="summary-card">
                 <h3>💰 Available Balance</h3>
                 <div class="value" id="available">Loading...</div>
+                <div style="font-size: 0.75em; color: #888; margin-top: 8px;">
+                    USDT not in orders
+                </div>
             </div>
             
             <div class="summary-card">
                 <h3>🔒 In Orders</h3>
                 <div class="value" id="locked">Loading...</div>
+                <div style="font-size: 0.75em; color: #888; margin-top: 8px;">
+                    USDT locked in orders
+                </div>
             </div>
             
             <div class="summary-card">
                 <h3>💵 Total Balance</h3>
                 <div class="value" id="total">Loading...</div>
+                <div style="font-size: 0.75em; color: #888; margin-top: 8px;">
+                    All assets (USDT value)
+                </div>
             </div>
             
             <div class="summary-card">
                 <h3>🤖 Allocated to Bots</h3>
                 <div class="value" id="allocated">$0.00</div>
+                <div style="font-size: 0.75em; color: #888; margin-top: 8px;">
+                    Total capital across all bots
+                </div>
+            </div>
+            
+            <div class="summary-card" style="border: 2px solid #667eea;">
+                <h3>✨ Available for Allocation</h3>
+                <div class="value" id="available-allocation" style="color: #667eea;">$0.00</div>
+                <div style="font-size: 0.75em; color: #888; margin-top: 8px;">
+                    USDT you can allocate to new/existing bots
+                </div>
             </div>
         </div>
         
@@ -360,11 +493,62 @@
         <div class="section">
             <div class="section-header">
                 <h2>🤖 Trading Bots</h2>
-                <button class="btn" onclick="showAddBotModal()">➕ Add New Bot</button>
+                <div style="display: flex; gap: 10px;">
+                    <button class="btn btn-sm" onclick="updateDashboard()" title="Refresh status from actual screen sessions">🔄 Refresh Status</button>
+                    <button class="btn" onclick="showAddBotModal()">➕ Add New Bot</button>
+                </div>
             </div>
             
             <div class="bots-grid" id="bots-grid">
                 <div class="empty-state">No bots yet. Add your first bot!</div>
+            </div>
+        </div>
+        
+        <!-- AI Sentiment Analysis Dashboard -->
+        <div class="section">
+            <div class="section-header">
+                <h2>🧠 AI Sentiment Analysis</h2>
+                <button onclick="refreshSentiment()" class="btn btn-sm">🔄 Refresh</button>
+            </div>
+            
+            <!-- Sentiment Summary -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                <div class="summary-card">
+                    <h3>🟢 Bullish</h3>
+                    <div class="value" style="color: #4caf50;" id="sentiment-positive">0%</div>
+                    <div style="color: #888; font-size: 0.9em;" id="sentiment-positive-count">0 articles</div>
+                </div>
+                <div class="summary-card">
+                    <h3>🔴 Bearish</h3>
+                    <div class="value" style="color: #f44336;" id="sentiment-negative">0%</div>
+                    <div style="color: #888; font-size: 0.9em;" id="sentiment-negative-count">0 articles</div>
+                </div>
+                <div class="summary-card">
+                    <h3>⚪ Neutral</h3>
+                    <div class="value" style="color: #888;" id="sentiment-neutral">0%</div>
+                    <div style="color: #888; font-size: 0.9em;" id="sentiment-neutral-count">0 articles</div>
+                </div>
+                <div class="summary-card">
+                    <h3>📰 Total Analyzed</h3>
+                    <div class="value" id="sentiment-total">0</div>
+                    <div style="color: #888; font-size: 0.9em;">articles</div>
+                </div>
+            </div>
+            
+            <!-- Top Recommendations -->
+            <div style="background: #1e1e1e; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                <h3 style="margin-top: 0;">🎯 Top AI Recommendations</h3>
+                <div id="recommendations-list">
+                    <div class="empty-state">No recommendations yet...</div>
+                </div>
+            </div>
+            
+            <!-- Recent Analyses -->
+            <div style="background: #1e1e1e; padding: 15px; border-radius: 8px;">
+                <h3 style="margin-top: 0;">📊 Recent AI Analyses</h3>
+                <div id="analyses-list" style="max-height: 400px; overflow-y: auto;">
+                    <div class="empty-state">No analyses yet...</div>
+                </div>
             </div>
         </div>
         
@@ -378,6 +562,121 @@
                 <div class="empty-state">No trades yet...</div>
             </div>
         </div>
+        
+        </div><!-- End Overview Tab -->
+        
+        <!-- Logs Tab Content -->
+        <div id="logs-tab" class="tab-content">
+        <!-- Bot Logs Viewer -->
+        <div class="section">
+            <div class="section-header">
+                <h2>📜 Bot Logs</h2>
+                <button class="btn btn-sm" onclick="refreshLogs()">🔄 Refresh</button>
+            </div>
+            
+            <!-- Log Filters -->
+            <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                <select id="log-bot-filter" onchange="refreshLogs()" style="padding: 8px; background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 5px; color: white;">
+                    <option value="">All Bots</option>
+                </select>
+                
+                <select id="log-type-filter" onchange="refreshLogs()" style="padding: 8px; background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 5px; color: white;">
+                    <option value="">All Types</option>
+                    <option value="buy">🟢 Buys</option>
+                    <option value="sell">🔴 Sells</option>
+                    <option value="signal">📊 Signals</option>
+                    <option value="error">❌ Errors</option>
+                    <option value="hold">⏸️ Holds</option>
+                    <option value="info">ℹ️ Info</option>
+                </select>
+                
+                <input type="text" id="log-search" placeholder="Search logs..." onkeyup="refreshLogs()" style="flex: 1; min-width: 200px; padding: 8px; background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 5px; color: white;">
+                
+                <button class="btn btn-sm" onclick="clearLogFilters()">Clear Filters</button>
+            </div>
+            
+            <!-- Logs Display -->
+            <div id="logs-container" style="max-height: 600px; overflow-y: auto; background: #0f0f1e; padding: 15px; border-radius: 5px; font-family: 'Courier New', monospace; font-size: 0.85em;">
+                <div style="color: #888; text-align: center;">Loading logs...</div>
+            </div>
+        </div>
+        </div><!-- End Logs Tab -->
+        
+        <!-- System Tab Content -->
+        <div id="system-tab" class="tab-content">
+            <!-- Git Status Section -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>📦 Git Repository Status</h2>
+                    <button class="btn btn-sm" onclick="refreshGitStatus()">🔄 Refresh</button>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+                    <div class="summary-card">
+                        <h3>🌿 Current Branch</h3>
+                        <div class="value" style="font-size: 1.3em;" id="git-branch">Loading...</div>
+                    </div>
+                    
+                    <div class="summary-card">
+                        <h3>📊 Status</h3>
+                        <div class="value" style="font-size: 1.3em;" id="git-status">Loading...</div>
+                    </div>
+                    
+                    <div class="summary-card">
+                        <h3>📝 Latest Commit</h3>
+                        <div style="font-size: 0.9em; color: #888; margin-top: 10px;" id="git-commit">Loading...</div>
+                    </div>
+                    
+                    <div class="summary-card">
+                        <h3>🔄 Remote Status</h3>
+                        <div class="value" style="font-size: 1.3em;" id="git-remote">Loading...</div>
+                    </div>
+                </div>
+                
+                <!-- Detailed Info -->
+                <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-top: 20px;">
+                    <h3 style="margin-top: 0;">📋 Detailed Information</h3>
+                    <div id="git-details" style="font-family: 'Courier New', monospace; font-size: 0.9em; line-height: 1.8;">
+                        Loading git information...
+                    </div>
+                </div>
+                
+                <!-- Update Actions -->
+                <div style="background: #1e1e2e; padding: 20px; border-radius: 8px; margin-top: 20px; border: 1px solid #2a2a3e;">
+                    <h3 style="margin-top: 0;">🚀 Update Actions</h3>
+                    <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                        <button class="btn" style="background: #4caf50;" onclick="pullUpdates()">⬇️ Pull Latest Changes</button>
+                        <button class="btn" style="background: #ff9800;" onclick="restartDashboard()">🔄 Restart Dashboard</button>
+                        <button class="btn btn-secondary" onclick="viewUpdateLog()">📜 View Update Log</button>
+                    </div>
+                    <div id="update-status" style="margin-top: 15px; padding: 10px; background: #0d0d17; border-radius: 5px; font-family: 'Courier New', monospace; font-size: 0.85em; display: none;"></div>
+                </div>
+            </div>
+            
+            <!-- Server Info Section -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>🖥️ Server Information</h2>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                    <div class="summary-card">
+                        <h3>💻 Python Version</h3>
+                        <div class="value" style="font-size: 1.1em;" id="python-version">Loading...</div>
+                    </div>
+                    
+                    <div class="summary-card">
+                        <h3>📂 Working Directory</h3>
+                        <div style="font-size: 0.85em; color: #888; margin-top: 10px; word-break: break-all;" id="working-dir">Loading...</div>
+                    </div>
+                    
+                    <div class="summary-card">
+                        <h3>⏱️ Dashboard Uptime</h3>
+                        <div class="value" style="font-size: 1.1em;" id="dashboard-uptime">Loading...</div>
+                    </div>
+                </div>
+            </div>
+        </div><!-- End System Tab -->
     </div>
     
     <!-- Add Bot Modal -->
@@ -391,14 +690,12 @@
             </div>
             
             <div class="form-group">
-                <label>Trading Symbol</label>
-                <input type="text" id="bot-symbol" placeholder="e.g. BTCUSDT" value="BTCUSDT">
-            </div>
-            
-            <div class="form-group">
                 <label>Strategy</label>
-                <select id="bot-strategy">
-                    <option value="simple_profitable">Simple Profitable (Recommended)</option>
+                <select id="bot-strategy" onchange="updateSymbolHelp()">
+                    <option value="ticker_news">📰 Ticker News Trading (NEWS-DRIVEN) ⭐ NEW!</option>
+                    <option value="simple_profitable">Simple Profitable (Technical)</option>
+                    <option value="ai_autonomous">🤖 AI Autonomous (AI Picks Coin!)</option>
+                    <option value="ai_news">🤖 AI News Trading (Single Coin)</option>
                     <option value="momentum">Momentum</option>
                     <option value="mean_reversion">Mean Reversion</option>
                     <option value="breakout">Breakout</option>
@@ -407,9 +704,39 @@
                 </select>
             </div>
             
+            <!-- Symbol input (for most strategies) -->
+            <div class="form-group" id="symbol-input-group">
+                <label>Trading Symbol <span id="symbol-help" style="color: #888; font-size: 0.85em;"></span></label>
+                <input type="text" id="bot-symbol" placeholder="e.g. BTCUSDT" value="BTCUSDT">
+            </div>
+            
+            <!-- Ticker dropdown (for ticker_news strategy) -->
+            <div class="form-group" id="ticker-select-group" style="display: none;">
+                <label>Select Ticker <span style="color: #667eea;">📰 News will be fetched for this ticker</span></label>
+                <select id="bot-ticker">
+                    <option value="BTC">BTC - Bitcoin</option>
+                    <option value="ETH">ETH - Ethereum</option>
+                    <option value="SOL">SOL - Solana</option>
+                    <option value="XRP">XRP - Ripple</option>
+                    <option value="ADA">ADA - Cardano</option>
+                    <option value="DOGE">DOGE - Dogecoin</option>
+                    <option value="MATIC">MATIC - Polygon</option>
+                    <option value="DOT">DOT - Polkadot</option>
+                    <option value="AVAX">AVAX - Avalanche</option>
+                    <option value="LINK">LINK - Chainlink</option>
+                </select>
+                <div style="color: #888; font-size: 0.8em; margin-top: 5px;">
+                    📰 Bot will fetch news for this ticker every hour and trade based on AI analysis
+                </div>
+            </div>
+            
             <div class="form-group">
-                <label>Trade Amount (USDT)</label>
-                <input type="number" id="bot-amount" placeholder="100" value="100">
+                <label>Allocated Capital (USDT) <span style="color: #888; font-size: 0.85em;">- Total USDT to give this bot</span></label>
+                <input type="number" id="bot-amount" placeholder="200" value="200">
+                <div style="color: #888; font-size: 0.8em; margin-top: 5px;">
+                    💡 This is the total USDT pool this bot will manage and trade with.<br>
+                    Example: $200 = Bot gets $200 USDT to use for all its trades.
+                </div>
             </div>
             
             <div class="form-actions">
@@ -432,8 +759,11 @@
             </div>
             
             <div class="form-group">
-                <label>Trade Amount (USDT)</label>
+                <label>Allocated Capital (USDT)</label>
                 <input type="number" id="edit-bot-amount">
+                <div style="color: #888; font-size: 0.8em; margin-top: 5px;">
+                    Total USDT this bot manages
+                </div>
             </div>
             
             <div class="form-actions">
@@ -443,8 +773,321 @@
         </div>
     </div>
     
+    <!-- Add Funds Modal -->
+    <div class="modal" id="add-funds-modal">
+        <div class="modal-content">
+            <h2>💰 Add Funds to Bot</h2>
+            
+            <input type="hidden" id="add-funds-bot-id">
+            
+            <div class="form-group">
+                <label>Available USDT Balance</label>
+                <div id="available-usdt" style="font-size: 1.5em; font-weight: bold; color: #4caf50; margin: 10px 0;">
+                    Loading...
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label>Amount to Add (USDT)</label>
+                <input type="number" id="add-funds-amount" placeholder="Enter amount" min="1" step="0.01">
+                <small style="color: #888; display: block; margin-top: 5px;">
+                    This will increase the bot's total investment. The bot will use this additional capital on its next buy.
+                </small>
+            </div>
+            
+            <div class="form-group">
+                <label>Quick Add</label>
+                <div style="display: flex; gap: 10px; margin-top: 10px;">
+                    <button class="btn btn-sm btn-secondary" onclick="setAddAmount(10)">+$10</button>
+                    <button class="btn btn-sm btn-secondary" onclick="setAddAmount(25)">+$25</button>
+                    <button class="btn btn-sm btn-secondary" onclick="setAddAmount(50)">+$50</button>
+                    <button class="btn btn-sm btn-secondary" onclick="setAddAmount(100)">+$100</button>
+                    <button class="btn btn-sm btn-secondary" onclick="setAddAmountMax()">Max</button>
+                </div>
+            </div>
+            
+            <div class="form-actions">
+                <button class="btn btn-secondary" onclick="hideAddFundsModal()">Cancel</button>
+                <button class="btn" style="background: #4caf50;" onclick="addFunds()">Add Funds</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Coin Details Modal -->
+    <div class="modal" id="coin-details-modal">
+        <div class="modal-content" style="max-width: 800px;">
+            <h2 id="coin-modal-title">💎 Coin Details</h2>
+            
+            <div id="coin-modal-body">
+                <!-- Dynamic content loaded here -->
+                <div style="text-align: center; padding: 40px; color: #888;">
+                    Loading coin details...
+                </div>
+            </div>
+            
+            <div class="form-actions" style="margin-top: 20px;">
+                <button class="btn btn-secondary" onclick="hideCoinModal()">Close</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Bot Details Modal -->
+    <div class="modal" id="bot-details-modal">
+        <div class="modal-content" style="max-width: 900px;">
+            <h2 id="bot-modal-title">🤖 Bot Details</h2>
+            
+            <div id="bot-modal-body" style="max-height: 70vh; overflow-y: auto;">
+                <!-- Dynamic content loaded here -->
+                <div style="text-align: center; padding: 40px; color: #888;">
+                    Loading bot details...
+                </div>
+            </div>
+            
+            <div class="form-actions" style="margin-top: 20px;">
+                <button class="btn btn-secondary" onclick="hideBotModal()">Close</button>
+            </div>
+        </div>
+    </div>
+    
     <script>
         let currentData = {};
+        let dashboardStartTime = Date.now();
+        
+        // Format date to local timezone in dd/mm/yyyy hh:mm am/pm format
+        function formatDateTime(dateString) {
+            if (!dateString) return 'N/A';
+            
+            const date = new Date(dateString);
+            
+            // Check if valid date
+            if (isNaN(date.getTime())) return dateString;
+            
+            // Get date components
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+            
+            // Get time components
+            let hours = date.getHours();
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const ampm = hours >= 12 ? 'pm' : 'am';
+            
+            // Convert to 12-hour format
+            hours = hours % 12;
+            hours = hours ? hours : 12; // 0 should be 12
+            hours = String(hours).padStart(2, '0');
+            
+            return `${day}/${month}/${year} ${hours}:${minutes} ${ampm}`;
+        }
+        
+        // Format time only (for shorter display)
+        function formatTime(dateString) {
+            if (!dateString) return 'N/A';
+            
+            const date = new Date(dateString);
+            if (isNaN(date.getTime())) return dateString;
+            
+            let hours = date.getHours();
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const ampm = hours >= 12 ? 'pm' : 'am';
+            
+            hours = hours % 12;
+            hours = hours ? hours : 12;
+            hours = String(hours).padStart(2, '0');
+            
+            return `${hours}:${minutes} ${ampm}`;
+        }
+        
+        // Format date only
+        function formatDate(dateString) {
+            if (!dateString) return 'N/A';
+            
+            const date = new Date(dateString);
+            if (isNaN(date.getTime())) return dateString;
+            
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+            
+            return `${day}/${month}/${year}`;
+        }
+        
+        // Tab switching
+        function switchTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Remove active class from all tab buttons
+            document.querySelectorAll('.tab').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Show selected tab
+            document.getElementById(tabName + '-tab').classList.add('active');
+            
+            // Add active class to clicked button
+            event.target.classList.add('active');
+            
+            // Load data for the tab if needed
+            if (tabName === 'logs') {
+                refreshLogs();
+            } else if (tabName === 'system') {
+                refreshGitStatus();
+                updateServerInfo();
+            }
+        }
+        
+        // Git status functions
+        function refreshGitStatus() {
+            fetch('/api/git/status')
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        renderGitStatus(result);
+                    } else {
+                        document.getElementById('git-branch').textContent = 'Error';
+                        document.getElementById('git-status').textContent = 'Error';
+                        document.getElementById('git-commit').innerHTML = 'Error: ' + result.error;
+                        document.getElementById('git-remote').textContent = 'Error';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching git status:', error);
+                });
+        }
+        
+        function renderGitStatus(data) {
+            // Branch
+            document.getElementById('git-branch').textContent = data.branch;
+            
+            // Status
+            const statusEl = document.getElementById('git-status');
+            if (data.status.clean) {
+                statusEl.innerHTML = '<span style="color: #4caf50;">✓ Clean</span>';
+            } else {
+                statusEl.innerHTML = `<span style="color: #ff9800;">⚠️ ${data.status.changes_count} change(s)</span>`;
+            }
+            
+            // Commit
+            document.getElementById('git-commit').innerHTML = `
+                <div style="margin-bottom: 5px;"><strong>${data.commit.hash}</strong></div>
+                <div style="color: #bbb;">${data.commit.message}</div>
+                <div style="color: #888; font-size: 0.85em; margin-top: 5px;">
+                    by ${data.commit.author} • ${data.commit.date}
+                </div>
+            `;
+            
+            // Remote status
+            const remoteEl = document.getElementById('git-remote');
+            if (data.remote.status === 'up-to-date') {
+                remoteEl.innerHTML = '<span style="color: #4caf50;">✓ Up to date</span>';
+            } else if (data.remote.status === 'behind') {
+                remoteEl.innerHTML = `<span style="color: #ff9800;">⬇️ ${data.remote.behind} behind</span>`;
+            } else if (data.remote.status === 'ahead') {
+                remoteEl.innerHTML = `<span style="color: #2196f3;">⬆️ ${data.remote.ahead} ahead</span>`;
+            } else if (data.remote.status === 'diverged') {
+                remoteEl.innerHTML = `<span style="color: #f44336;">⚠️ Diverged</span>`;
+            } else {
+                remoteEl.innerHTML = '<span style="color: #888;">Unknown</span>';
+            }
+            
+            // Detailed info
+            let details = `<div style="color: #4caf50; margin-bottom: 10px;">✓ Git repository found</div>`;
+            details += `<div><strong>Branch:</strong> ${data.branch}</div>`;
+            details += `<div><strong>Latest Commit:</strong> ${data.commit.hash} - ${data.commit.message}</div>`;
+            details += `<div><strong>Author:</strong> ${data.commit.author}</div>`;
+            details += `<div><strong>Date:</strong> ${data.commit.date}</div>`;
+            details += `<div><strong>Working Tree:</strong> ${data.status.clean ? 'Clean ✓' : data.status.changes_count + ' uncommitted changes ⚠️'}</div>`;
+            
+            if (data.remote.status === 'behind') {
+                details += `<div style="color: #ff9800; margin-top: 10px;"><strong>⚠️ Your code is ${data.remote.behind} commit(s) behind origin/${data.branch}</strong></div>`;
+                details += `<div style="color: #888;">Click "Pull Latest Changes" to update</div>`;
+            } else if (data.remote.status === 'up-to-date') {
+                details += `<div style="color: #4caf50; margin-top: 10px;"><strong>✓ Your code is up to date!</strong></div>`;
+            }
+            
+            document.getElementById('git-details').innerHTML = details;
+        }
+        
+        function updateServerInfo() {
+            fetch('/api/git/status')
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        document.getElementById('python-version').textContent = result.python_version;
+                        document.getElementById('working-dir').textContent = result.working_dir;
+                        
+                        // Calculate uptime
+                        const uptime = Math.floor((Date.now() - dashboardStartTime) / 1000);
+                        const hours = Math.floor(uptime / 3600);
+                        const minutes = Math.floor((uptime % 3600) / 60);
+                        const seconds = uptime % 60;
+                        document.getElementById('dashboard-uptime').textContent = 
+                            `${hours}h ${minutes}m ${seconds}s`;
+                    }
+                })
+                .catch(error => console.error('Error fetching server info:', error));
+        }
+        
+        function pullUpdates() {
+            if (!confirm(`Pull latest changes from git?
+
+This will update your code to the latest version.`)) {
+                return;
+            }
+            
+            const statusEl = document.getElementById('update-status');
+            statusEl.style.display = 'block';
+            statusEl.innerHTML = '⏳ Pulling latest changes...';
+            
+            // Note: This would need a new API endpoint to actually execute git pull
+            // For now, just show a message
+            setTimeout(() => {
+                statusEl.innerHTML = '⚠️ Manual update required. Run: git pull origin main';
+            }, 1000);
+        }
+        
+        function restartDashboard() {
+            if (!confirm(`Restart the dashboard now?
+
+This will:
+• Stop the current dashboard server
+• Start a new instance
+• Refresh this page automatically
+
+Continue?`)) {
+                return;
+            }
+            
+            fetch('/api/dashboard/restart', { method: 'POST' })
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        alert(result.message);
+                        // Refresh page after 5 seconds
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 5000);
+                    } else {
+                        alert('Error restarting dashboard: ' + result.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Restart error:', error);
+                    // Dashboard might have restarted, try refreshing anyway
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 5000);
+                });
+        }
+        
+        function viewUpdateLog() {
+            alert(`To view update log, run on your server:
+
+tail -f /root/tradingbot/auto_update.log`);
+        }
         
         // Update dashboard
         function updateDashboard() {
@@ -463,18 +1106,25 @@
                     currentData = result;
                     
                     // Update account info
-                    document.getElementById('available').textContent = '$' + result.account.available.toFixed(2);
-                    document.getElementById('locked').textContent = '$' + result.account.locked.toFixed(2);
+                    // Use usdt_available for "Available Balance" (USDT only, not all assets)
+                    document.getElementById('available').textContent = '$' + result.account.usdt_available.toFixed(2);
+                    document.getElementById('locked').textContent = '$' + result.account.usdt_locked.toFixed(2);
                     document.getElementById('total').textContent = '$' + result.account.total.toFixed(2);
                     document.getElementById('allocated').textContent = '$' + result.total_allocated.toFixed(2);
                     document.getElementById('mode').textContent = result.account.mode;
                     
+                    // Calculate and display available USDT for allocation
+                    // Use usdt_available from backend (already calculated)
+                    const availableForAllocation = Math.max(0, result.account.usdt_available - result.total_allocated);
+                    document.getElementById('available-allocation').textContent = '$' + availableForAllocation.toFixed(2);
+                    
+                    // Store for validation when adding bots
+                    window.availableUSDT = availableForAllocation;
+                    
                     // Show error if present
                     if (result.account.error) {
                         console.error('Account error:', result.account.error);
-                        alert('API Error: ' + result.account.error + '
-
-Check your .env file and API keys!');
+                        alert('API Error: ' + result.account.error + '\n\nCheck your .env file and API keys!');
                     }
                     
                     // Update assets
@@ -504,8 +1154,8 @@ Check your .env file and API keys!');
             }
             
             list.innerHTML = balances.map(bal => `
-                <div class="summary-card">
-                    <h3>${bal.asset}</h3>
+                <div class="summary-card clickable" onclick="showCoinDetails('${bal.asset}')">
+                    <h3>${bal.asset} <span style="font-size: 0.8em; color: #667eea;">🔍 Click for details</span></h3>
                     <div class="value" style="font-size: 1.3em;">${bal.free.toFixed(8)}</div>
                     <div style="color: #888; font-size: 0.9em; margin-top: 5px;">
                         ≈ $${bal.value_usdt.toFixed(2)}
@@ -524,16 +1174,46 @@ Check your .env file and API keys!');
             }
             
             grid.innerHTML = bots.map(bot => `
-                <div class="bot-card">
+                <div class="bot-card" style="cursor: pointer;" onclick="event.stopPropagation(); if (!event.target.closest('button')) showBotDetails(${bot.id});" title="Click for full details">
                     <div class="bot-header">
-                        <div class="bot-title">${bot.name}</div>
-                        <div class="bot-status ${bot.status}">${bot.status.toUpperCase()}</div>
+                        <div class="bot-title">${bot.name} <span style="font-size: 0.7em; color: #667eea;">🔍</span></div>
+                        <div class="bot-status ${bot.status}" title="Verified against screen sessions">
+                            ${bot.status.toUpperCase()} ✓
+                        </div>
                     </div>
                     
                     <div class="bot-info">
                         <div>📈 ${bot.symbol}</div>
                         <div>🎯 ${bot.strategy.replace('_', ' ').toUpperCase()}</div>
-                        <div>💵 $${bot.trade_amount} per trade</div>
+                    </div>
+                    
+                    <!-- Bot Wallet -->
+                    <div style="background: #16161f; padding: 12px; border-radius: 6px; margin: 12px 0; border: 1px solid #2a2a3e;">
+                        <div style="font-weight: bold; color: #667eea; margin-bottom: 8px; font-size: 0.9em;">💰 BOT WALLET</div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.85em;">
+                            <div>
+                                <div style="color: #888;">Allocated:</div>
+                                <div style="font-weight: bold; color: #fff;">$${bot.trade_amount.toFixed(2)}</div>
+                            </div>
+                            <div>
+                                <div style="color: #888;">Current Value:</div>
+                                <div style="font-weight: bold; color: #4caf50;">$${((bot.wallet && bot.wallet.total_value) || bot.trade_amount).toFixed(2)}</div>
+                            </div>
+                        </div>
+                        ${bot.wallet ? `
+                            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #2a2a3e; font-size: 0.8em;">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                                    <span style="color: #888;">USDT:</span>
+                                    <span style="color: #fff;">${bot.wallet.usdt.toFixed(2)}</span>
+                                </div>
+                                ${bot.wallet.crypto_value > 0 ? `
+                                    <div style="display: flex; justify-content: space-between;">
+                                        <span style="color: #888;">${bot.wallet.crypto_symbol}:</span>
+                                        <span style="color: #fff;">${bot.wallet.crypto_amount.toFixed(8)} ($${bot.wallet.crypto_value.toFixed(2)})</span>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        ` : ''}
                     </div>
                     
                     <div class="bot-stats">
@@ -542,12 +1222,51 @@ Check your .env file and API keys!');
                             <div class="value">${bot.trades}</div>
                         </div>
                         <div class="bot-stat">
-                            <div class="label">PROFIT</div>
+                            <div class="label">P&L</div>
                             <div class="value" style="color: ${bot.profit >= 0 ? '#4caf50' : '#f44336'}">
                                 ${bot.profit >= 0 ? '+' : ''}$${bot.profit.toFixed(2)}
                             </div>
                         </div>
+                        <div class="bot-stat">
+                            <div class="label">ROI</div>
+                            <div class="value" style="color: ${bot.profit >= 0 ? '#4caf50' : '#f44336'}">
+                                ${bot.trade_amount > 0 ? ((bot.profit / bot.trade_amount) * 100).toFixed(1) : '0.0'}%
+                            </div>
+                        </div>
                     </div>
+                    
+                    ${bot.position ? `
+                    <div class="position-panel">
+                        <div class="position-header">
+                            📊 ACTIVE POSITION
+                        </div>
+                        <div class="position-details">
+                            <div class="position-detail">
+                                <span class="label">Symbol:</span>
+                                <span class="value">${bot.position.symbol || bot.symbol}</span>
+                            </div>
+                            <div class="position-detail">
+                                <span class="label">Entry:</span>
+                                <span class="value">$${bot.position.entry_price?.toFixed(2) || 'N/A'}</span>
+                            </div>
+                            <div class="position-detail">
+                                <span class="label">Current:</span>
+                                <span class="value">$${bot.position.current_price?.toFixed(2) || 'N/A'}</span>
+                            </div>
+                            <div class="position-detail">
+                                <span class="label">P&L:</span>
+                                <span class="value" style="color: ${bot.position.pnl_pct >= 0 ? '#4caf50' : '#f44336'}">
+                                    ${bot.position.pnl_pct >= 0 ? '+' : ''}${bot.position.pnl_pct.toFixed(2)}%
+                                </span>
+                            </div>
+                        </div>
+                        ${bot.position.ai_reasoning ? `
+                        <div class="ai-reasoning">
+                            <strong>🤖 AI:</strong> ${bot.position.ai_reasoning}
+                        </div>
+                        ` : ''}
+                    </div>
+                    ` : ''}
                     
                     <div class="bot-controls">
                         ${bot.status === 'stopped' 
@@ -555,6 +1274,7 @@ Check your .env file and API keys!');
                             : `<button class="btn btn-sm btn-danger" onclick="stopBot(${bot.id})">⏹ Stop</button>`
                         }
                         <button class="btn btn-sm btn-secondary" onclick="editBot(${bot.id})">✏️ Edit</button>
+                        <button class="btn btn-sm" style="background: #4caf50;" onclick="showAddFundsModal(${bot.id})">💰 Add Funds</button>
                         <button class="btn btn-sm btn-danger" onclick="deleteBot(${bot.id})">🗑️</button>
                     </div>
                 </div>
@@ -570,17 +1290,73 @@ Check your .env file and API keys!');
                 return;
             }
             
-            list.innerHTML = trades.map(trade => `
-                <div class="trade-item">
-                    <div class="trade-time">${trade.time}</div>
-                    <div>${trade.info}</div>
-                </div>
-            `).reverse().join('');
+            list.innerHTML = trades.map(trade => {
+                // Try to format trade time if it's a valid date
+                let formattedTime = trade.time;
+                try {
+                    const date = new Date(trade.time);
+                    if (!isNaN(date.getTime())) {
+                        formattedTime = formatDateTime(trade.time);
+                    }
+                } catch (e) {
+                    // If parsing fails, keep original
+                }
+                
+                return `
+                    <div class="trade-item">
+                        <div class="trade-time">${formattedTime}</div>
+                        <div>${trade.info}</div>
+                    </div>
+                `;
+            }).reverse().join('');
+        }
+        
+        // Update symbol help text based on strategy
+        function updateSymbolHelp() {
+            const strategy = document.getElementById('bot-strategy').value;
+            const helpText = document.getElementById('symbol-help');
+            const symbolInputGroup = document.getElementById('symbol-input-group');
+            const tickerSelectGroup = document.getElementById('ticker-select-group');
+            
+            // Show/hide appropriate input based on strategy
+            if (strategy === 'ticker_news') {
+                // Show ticker dropdown for news-driven strategy
+                symbolInputGroup.style.display = 'none';
+                tickerSelectGroup.style.display = 'block';
+            } else {
+                // Show symbol input for all other strategies
+                symbolInputGroup.style.display = 'block';
+                tickerSelectGroup.style.display = 'none';
+                
+                // Update help text
+                if (strategy === 'ai_autonomous') {
+                    helpText.textContent = '(ignored - AI picks the coin!)';
+                    helpText.style.color = '#f39c12';
+                } else if (strategy === 'ai_news') {
+                    helpText.textContent = '(which coin to monitor)';
+                    helpText.style.color = '#888';
+                } else {
+                    helpText.textContent = '';
+                }
+            }
         }
         
         // Show/hide modals
         function showAddBotModal() {
-            document.getElementById('add-bot-modal').style.display = 'flex';
+            try {
+                const modal = document.getElementById('add-bot-modal');
+                if (!modal) {
+                    console.error('❌ Modal not found!');
+                    alert('Error: Modal element not found. Try refreshing the page.');
+                    return;
+                }
+                console.log('✓ Opening Add Bot modal');
+                modal.style.display = 'flex';
+                updateSymbolHelp(); // Initialize help text
+            } catch (error) {
+                console.error('❌ Error opening modal:', error);
+                alert('Error opening modal: ' + error.message);
+            }
         }
         
         function hideAddBotModal() {
@@ -591,17 +1367,129 @@ Check your .env file and API keys!');
             document.getElementById('edit-bot-modal').style.display = 'none';
         }
         
+        // Show/hide add funds modal
+        function showAddFundsModal(botId) {
+            document.getElementById('add-funds-bot-id').value = botId;
+            document.getElementById('add-funds-amount').value = '';
+            document.getElementById('add-funds-modal').style.display = 'flex';
+            
+            // Fetch and display available USDT balance
+            fetch('/api/overview')
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        document.getElementById('available-usdt').textContent = 
+                            '$' + result.account.available.toFixed(2);
+                    } else {
+                        document.getElementById('available-usdt').textContent = 'Error loading';
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('available-usdt').textContent = 'Error loading';
+                });
+        }
+        
+        function hideAddFundsModal() {
+            document.getElementById('add-funds-modal').style.display = 'none';
+        }
+        
+        function setAddAmount(amount) {
+            document.getElementById('add-funds-amount').value = amount;
+        }
+        
+        function setAddAmountMax() {
+            // Get available balance from the displayed value
+            const availableText = document.getElementById('available-usdt').textContent;
+            const available = parseFloat(availableText.replace('$', '').replace(',', ''));
+            if (!isNaN(available)) {
+                document.getElementById('add-funds-amount').value = available.toFixed(2);
+            }
+        }
+        
+        function addFunds() {
+            const botId = parseInt(document.getElementById('add-funds-bot-id').value);
+            const amount = parseFloat(document.getElementById('add-funds-amount').value);
+            
+            if (!amount || amount <= 0) {
+                alert('Please enter a valid amount');
+                return;
+            }
+            
+            // Validate allocation doesn't exceed available USDT
+            if (window.availableUSDT !== undefined && amount > window.availableUSDT) {
+                alert(`❌ Insufficient USDT for allocation!
+
+Requested: $${amount.toFixed(2)}
+Available: $${window.availableUSDT.toFixed(2)}
+
+You can only allocate up to $${window.availableUSDT.toFixed(2)} USDT.`);
+                return;
+            }
+            
+            if (!confirm(`Add $${amount.toFixed(2)} to this bot?
+
+This will increase the bot's total investment and it will use the additional capital on its next buy.`)) {
+                return;
+            }
+            
+            fetch(`/api/bot/${botId}/add_funds`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ amount: amount })
+            })
+            .then(response => response.json())
+            .then(result => {
+                if (result.success) {
+                    hideAddFundsModal();
+                    updateDashboard();
+                    alert(result.message);
+                } else {
+                    alert('Error: ' + result.error);
+                }
+            })
+            .catch(error => {
+                alert('Error adding funds: ' + error.message);
+            });
+        }
+        
         // Add bot
         function addBot() {
+            const strategy = document.getElementById('bot-strategy').value;
+            let symbol;
+            
+            // For ticker_news strategy, use ticker dropdown
+            if (strategy === 'ticker_news') {
+                const ticker = document.getElementById('bot-ticker').value;
+                symbol = ticker + 'USDT';  // Convert ticker to symbol (e.g., BTC -> BTCUSDT)
+            } else {
+                symbol = document.getElementById('bot-symbol').value.toUpperCase();
+            }
+            
             const data = {
                 name: document.getElementById('bot-name').value,
-                symbol: document.getElementById('bot-symbol').value.toUpperCase(),
-                strategy: document.getElementById('bot-strategy').value,
+                symbol: symbol,
+                strategy: strategy,
                 trade_amount: parseFloat(document.getElementById('bot-amount').value)
             };
             
             if (!data.name || !data.symbol || !data.trade_amount) {
                 alert('Please fill all fields');
+                return;
+            }
+            
+            // Validate allocation doesn't exceed available USDT
+            if (window.availableUSDT !== undefined && data.trade_amount > window.availableUSDT) {
+                alert(`❌ Insufficient USDT for allocation!
+
+Requested: $${data.trade_amount.toFixed(2)}
+Available: $${window.availableUSDT.toFixed(2)}
+
+You can only allocate up to $${window.availableUSDT.toFixed(2)} USDT.
+
+💡 Tip: 
+• Deposit more USDT to your account
+• Reduce other bot allocations
+• Or enter a lower amount`);
                 return;
             }
             
@@ -619,7 +1507,10 @@ Check your .env file and API keys!');
                     // Clear form
                     document.getElementById('bot-name').value = '';
                     document.getElementById('bot-symbol').value = 'BTCUSDT';
-                    document.getElementById('bot-amount').value = '100';
+                    document.getElementById('bot-ticker').value = 'BTC';
+                    document.getElementById('bot-amount').value = '200';
+                    document.getElementById('bot-strategy').value = 'ticker_news';
+                    updateSymbolHelp(); // Reset to default view
                 } else {
                     alert('Error: ' + result.error);
                 }
@@ -663,19 +1554,14 @@ Check your .env file and API keys!');
         
         // Start/Stop bot
         function startBot(botId) {
-            if (!confirm('Start this bot?
-
-This will begin LIVE TRADING with real orders!')) return;
+            if (!confirm('Start this bot?\n\nThis will begin LIVE TRADING with real orders!')) return;
             
             fetch(`/api/bot/${botId}/start`, {method: 'POST'})
                 .then(response => response.json())
                 .then(result => {
                     if (result.success) {
                         updateDashboard();
-                        alert(result.message + '
-
-Bot is now trading live! Check logs with:
-screen -r bot_' + botId);
+                        alert(result.message + '\n\nBot is now trading live! Check logs with:\nscreen -r bot_' + botId);
                     } else {
                         alert('Error: ' + (result.error || result.message));
                     }
@@ -683,9 +1569,7 @@ screen -r bot_' + botId);
         }
         
         function stopBot(botId) {
-            if (!confirm('Stop this bot?
-
-This will halt all trading immediately.')) return;
+            if (!confirm('Stop this bot?\n\nThis will halt all trading immediately.')) return;
             
             fetch(`/api/bot/${botId}/stop`, {method: 'POST'})
                 .then(response => response.json())
@@ -714,6 +1598,402 @@ This will halt all trading immediately.')) return;
                 });
         }
         
+        // Show/hide coin details modal
+        function showCoinDetails(symbol) {
+            document.getElementById('coin-details-modal').style.display = 'flex';
+            document.getElementById('coin-modal-title').textContent = `💎 ${symbol} Details`;
+            document.getElementById('coin-modal-body').innerHTML = `
+                <div style="text-align: center; padding: 40px; color: #888;">
+                    <div class="spinner"></div>
+                    Loading ${symbol} details...
+                </div>
+            `;
+            
+            // Fetch coin details
+            fetch(`/api/coin/${symbol}`)
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        renderCoinDetails(result);
+                    } else {
+                        document.getElementById('coin-modal-body').innerHTML = `
+                            <div style="text-align: center; padding: 40px; color: #f44336;">
+                                ❌ Error loading coin details: ${result.error}
+                            </div>
+                        `;
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('coin-modal-body').innerHTML = `
+                        <div style="text-align: center; padding: 40px; color: #f44336;">
+                            ❌ Connection error: ${error.message}
+                        </div>
+                    `;
+                });
+        }
+        
+        function hideCoinModal() {
+            document.getElementById('coin-details-modal').style.display = 'none';
+        }
+        
+        // Bot Details Modal Functions
+        function showBotDetails(botId) {
+            document.getElementById('bot-details-modal').style.display = 'flex';
+            document.getElementById('bot-modal-title').textContent = `🤖 Bot #${botId} Details`;
+            document.getElementById('bot-modal-body').innerHTML = `
+                <div style="text-align: center; padding: 40px; color: #888;">
+                    <div class="spinner"></div>
+                    Loading bot details...
+                </div>
+            `;
+            
+            // Fetch bot details
+            fetch(`/api/bot/${botId}/details`)
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        renderBotDetails(result);
+                    } else {
+                        document.getElementById('bot-modal-body').innerHTML = `
+                            <div style="text-align: center; padding: 40px; color: #f44336;">
+                                ❌ Error loading bot details: ${result.error}
+                            </div>
+                        `;
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('bot-modal-body').innerHTML = `
+                        <div style="text-align: center; padding: 40px; color: #f44336;">
+                            ❌ Connection error: ${error.message}
+                        </div>
+                    `;
+                });
+        }
+        
+        function hideBotModal() {
+            document.getElementById('bot-details-modal').style.display = 'none';
+        }
+        
+        function renderBotDetails(data) {
+            const modalBody = document.getElementById('bot-modal-body');
+            const bot = data.bot;
+            const investment = data.investment;
+            const profitPct = investment.total_investment > 0 ? ((bot.profit / investment.total_investment) * 100) : 0;
+            const profitColor = bot.profit >= 0 ? '#4caf50' : '#f44336';
+            
+            modalBody.innerHTML = `
+                <!-- Bot Summary -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px;">
+                        <div style="color: #888; font-size: 0.9em; margin-bottom: 5px;">Status</div>
+                        <div style="font-size: 1.3em; font-weight: bold; color: ${bot.status === 'running' ? '#4caf50' : '#f44336'};">
+                            ${bot.status === 'running' ? '🟢 RUNNING' : '⏸️ STOPPED'}
+                        </div>
+                    </div>
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px;">
+                        <div style="color: #888; font-size: 0.9em; margin-bottom: 5px;">Trading Symbol</div>
+                        <div style="font-size: 1.3em; font-weight: bold;">${bot.symbol}</div>
+                    </div>
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px;">
+                        <div style="color: #888; font-size: 0.9em; margin-bottom: 5px;">Strategy</div>
+                        <div style="font-size: 1em; font-weight: bold;">${bot.strategy.replace('_', ' ').toUpperCase()}</div>
+                    </div>
+                </div>
+                
+                <!-- Investment Details -->
+                <div style="background: linear-gradient(135deg, #1a1a2e 0%, #0f0f1e 100%); padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 2px solid #667eea;">
+                    <h3 style="margin: 0 0 15px 0; color: #667eea;">💰 Investment Breakdown</h3>
+                    
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 15px;">
+                        <div>
+                            <div style="color: #888; font-size: 0.9em;">Initial Investment</div>
+                            <div style="font-size: 1.5em; font-weight: bold; color: #fff;">$${investment.initial_investment.toFixed(2)}</div>
+                        </div>
+                        ${investment.capital_additions.length > 0 ? `
+                            <div>
+                                <div style="color: #888; font-size: 0.9em;">Additional Funds</div>
+                                <div style="font-size: 1.5em; font-weight: bold; color: #4caf50;">
+                                    +$${investment.capital_additions.reduce((sum, add) => sum + add.amount, 0).toFixed(2)}
+                                </div>
+                            </div>
+                        ` : ''}
+                    </div>
+                    
+                    ${investment.capital_additions.length > 0 ? `
+                        <div style="background: #16161f; padding: 12px; border-radius: 6px; margin-bottom: 15px;">
+                            <div style="font-weight: bold; margin-bottom: 8px; color: #888;">Capital Addition History:</div>
+                            ${investment.capital_additions.map(add => `
+                                <div style="display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #2a2a3e;">
+                                    <span style="color: #aaa;">${formatDateTime(add.timestamp)}</span>
+                                    <span style="color: #4caf50; font-weight: bold;">+$${add.amount.toFixed(2)}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : ''}
+                    
+                    <div style="padding-top: 15px; border-top: 2px solid #2a2a3e;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <div style="color: #888; font-size: 0.9em;">Total Investment</div>
+                                <div style="font-size: 1.8em; font-weight: bold; color: #667eea;">$${investment.total_investment.toFixed(2)}</div>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="color: #888; font-size: 0.9em;">Current Profit/Loss</div>
+                                <div style="font-size: 1.8em; font-weight: bold; color: ${profitColor};">
+                                    ${bot.profit >= 0 ? '+' : ''}$${bot.profit.toFixed(2)}
+                                </div>
+                                <div style="font-size: 1.2em; color: ${profitColor};">
+                                    ${profitPct >= 0 ? '+' : ''}${profitPct.toFixed(2)}%
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    ${!investment.has_traded ? `
+                        <div style="background: #ff9800; color: #000; padding: 10px; border-radius: 6px; margin-top: 15px; text-align: center;">
+                            ⚠️ Bot hasn't made its first trade yet
+                        </div>
+                    ` : ''}
+                </div>
+                
+                <!-- Current Position -->
+                ${data.current_position ? `
+                    <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #4caf50;">
+                        <h3 style="margin: 0 0 15px 0;">📊 Current Position</h3>
+                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+                            <div>
+                                <div style="color: #888; font-size: 0.9em;">Entry Price</div>
+                                <div style="font-size: 1.3em; font-weight: bold;">$${data.current_position.entry_price?.toFixed(2) || 'N/A'}</div>
+                            </div>
+                            <div>
+                                <div style="color: #888; font-size: 0.9em;">Current Price</div>
+                                <div style="font-size: 1.3em; font-weight: bold;">$${data.current_position.current_price?.toFixed(2) || 'N/A'}</div>
+                            </div>
+                            <div>
+                                <div style="color: #888; font-size: 0.9em;">Position P&L</div>
+                                <div style="font-size: 1.3em; font-weight: bold; color: ${data.current_position.pnl_pct >= 0 ? '#4caf50' : '#f44336'};">
+                                    ${data.current_position.pnl_pct >= 0 ? '+' : ''}${data.current_position.pnl_pct?.toFixed(2) || '0.00'}%
+                                </div>
+                            </div>
+                            <div>
+                                <div style="color: #888; font-size: 0.9em;">Symbol</div>
+                                <div style="font-size: 1.3em; font-weight: bold;">${data.current_position.symbol || bot.symbol}</div>
+                            </div>
+                        </div>
+                        ${data.current_position.ai_reasoning ? `
+                            <div style="background: rgba(76, 175, 80, 0.1); padding: 12px; border-radius: 6px; margin-top: 15px; border-left: 3px solid #4caf50;">
+                                <div style="font-weight: bold; color: #4caf50; margin-bottom: 5px;">🤖 AI Reasoning:</div>
+                                <div style="color: #ccc;">${data.current_position.ai_reasoning}</div>
+                            </div>
+                        ` : ''}
+                    </div>
+                ` : `
+                    <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 20px; text-align: center; color: #888;">
+                        No active position - Bot is waiting for next buy signal
+                    </div>
+                `}
+                
+                <!-- Performance Stats -->
+                <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                    <h3 style="margin: 0 0 15px 0;">📈 Performance Stats</h3>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+                        <div style="text-align: center; padding: 15px; background: #16161f; border-radius: 6px;">
+                            <div style="color: #888; font-size: 0.85em; margin-bottom: 5px;">Total Trades</div>
+                            <div style="font-size: 1.8em; font-weight: bold; color: #667eea;">${bot.trades_count}</div>
+                        </div>
+                        <div style="text-align: center; padding: 15px; background: #16161f; border-radius: 6px;">
+                            <div style="color: #888; font-size: 0.85em; margin-bottom: 5px;">ROI</div>
+                            <div style="font-size: 1.8em; font-weight: bold; color: ${profitColor};">
+                                ${profitPct >= 0 ? '+' : ''}${profitPct.toFixed(1)}%
+                            </div>
+                        </div>
+                        <div style="text-align: center; padding: 15px; background: #16161f; border-radius: 6px;">
+                            <div style="color: #888; font-size: 0.85em; margin-bottom: 5px;">Total P&L</div>
+                            <div style="font-size: 1.8em; font-weight: bold; color: ${profitColor};">
+                                ${bot.profit >= 0 ? '+' : ''}$${bot.profit.toFixed(2)}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Trade History -->
+                ${data.trade_history && data.trade_history.length > 0 ? `
+                    <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                        <h3 style="margin: 0 0 15px 0;">📜 Trade History (Last 20)</h3>
+                        <div style="max-height: 300px; overflow-y: auto;">
+                            ${data.trade_history.map(trade => {
+                                const isBuy = trade.action === 'BUY';
+                                const color = isBuy ? '#4caf50' : '#f44336';
+                                const icon = isBuy ? '🟢' : '🔴';
+                                return `
+                                    <div style="background: #16161f; padding: 12px; border-radius: 6px; margin-bottom: 8px; border-left: 3px solid ${color};">
+                                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                                            <span style="color: ${color}; font-weight: bold;">${icon} ${trade.action}</span>
+                                            <span style="color: #888; font-size: 0.9em;">${formatDateTime(trade.timestamp)}</span>
+                                        </div>
+                                        <div style="color: #ccc; font-size: 0.9em;">${trade.details}</div>
+                                    </div>
+                                `;
+                            }).reverse().join('')}
+                        </div>
+                    </div>
+                ` : `
+                    <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 20px; text-align: center; color: #888;">
+                        No trade history yet
+                    </div>
+                `}
+                
+                <!-- Recent Logs -->
+                ${data.recent_logs && data.recent_logs.length > 0 ? `
+                    <div style="background: #1a1a2e; padding: 20px; border-radius: 8px;">
+                        <h3 style="margin: 0 0 15px 0;">📋 Recent Activity Logs (Last 50)</h3>
+                        <div style="max-height: 300px; overflow-y: auto; background: #0f0f1e; padding: 12px; border-radius: 6px; font-family: 'Courier New', monospace; font-size: 0.8em;">
+                            ${data.recent_logs.map(log => `
+                                <div style="padding: 4px 0; border-bottom: 1px solid #2a2a3e; color: #aaa;">
+                                    ${log}
+                                </div>
+                            `).reverse().join('')}
+                        </div>
+                    </div>
+                ` : `
+                    <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; text-align: center; color: #888;">
+                        No logs available yet
+                    </div>
+                `}
+            `;
+        }
+        
+        function renderCoinDetails(data) {
+            const modalBody = document.getElementById('coin-modal-body');
+            
+            // Calculate P&L if there's a position
+            let pnlHtml = '';
+            if (data.position_details && data.position_details.length > 0) {
+                const pos = data.position_details[0];
+                const currentPrice = data.price.current;
+                const entryPrice = pos.entry_price || 0;
+                const pnl = ((currentPrice - entryPrice) / entryPrice * 100).toFixed(2);
+                const pnlColor = pnl >= 0 ? '#4caf50' : '#f44336';
+                
+                pnlHtml = `
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-top: 15px; border: 1px solid ${pnl >= 0 ? '#4caf50' : '#f44336'};">
+                        <h4 style="margin: 0 0 10px 0;">📊 Position P&L</h4>
+                        <div style="font-size: 1.8em; font-weight: bold; color: ${pnlColor};">
+                            ${pnl >= 0 ? '+' : ''}${pnl}%
+                        </div>
+                        <div style="color: #888; margin-top: 5px;">
+                            Entry: $${entryPrice.toFixed(2)} → Current: $${currentPrice.toFixed(2)}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            modalBody.innerHTML = `
+                <!-- Balance Summary -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px;">
+                        <div style="color: #888; font-size: 0.9em; margin-bottom: 5px;">Total Balance</div>
+                        <div style="font-size: 1.3em; font-weight: bold;">${data.balance.total.toFixed(8)}</div>
+                        <div style="color: #888; font-size: 0.85em; margin-top: 3px;">${data.symbol}</div>
+                    </div>
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px;">
+                        <div style="color: #888; font-size: 0.9em; margin-bottom: 5px;">Current Price</div>
+                        <div style="font-size: 1.3em; font-weight: bold;">$${data.price.current.toFixed(2)}</div>
+                        <div style="color: #888; font-size: 0.85em; margin-top: 3px;">USDT</div>
+                    </div>
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px;">
+                        <div style="color: #888; font-size: 0.9em; margin-bottom: 5px;">Total Value</div>
+                        <div style="font-size: 1.3em; font-weight: bold; color: #4caf50;">$${data.price.usdt_value.toFixed(2)}</div>
+                        <div style="color: #888; font-size: 0.85em; margin-top: 3px;">USDT</div>
+                    </div>
+                </div>
+                
+                ${pnlHtml}
+                
+                <!-- Management Status -->
+                <div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-top: 15px;">
+                    <h4 style="margin: 0 0 10px 0;">🤖 Management Status</h4>
+                    ${data.is_being_managed ? `
+                        <div style="color: #4caf50; margin-bottom: 10px;">
+                            ✅ Currently managed by ${data.managing_bots.length} bot(s)
+                        </div>
+                        ${data.managing_bots.map(bot => `
+                            <div style="background: #16161f; padding: 10px; border-radius: 6px; margin-top: 8px; border-left: 3px solid #667eea;">
+                                <div style="font-weight: bold;">${bot.name}</div>
+                                <div style="color: #888; font-size: 0.9em; margin-top: 3px;">
+                                    Strategy: ${bot.strategy.replace('_', ' ').toUpperCase()} | 
+                                    Status: <span style="color: ${bot.status === 'running' ? '#4caf50' : '#f44336'};">
+                                        ${bot.status.toUpperCase()}
+                                    </span>
+                                </div>
+                                ${bot.position ? `
+                                    <div style="margin-top: 8px; padding: 8px; background: #0d0d15; border-radius: 4px;">
+                                        <div style="font-size: 0.85em; color: #888;">AI Reasoning:</div>
+                                        <div style="font-size: 0.9em; margin-top: 4px;">${bot.position.reasoning || 'No reasoning available'}</div>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `).join('')}
+                    ` : `
+                        <div style="color: #ff9800;">
+                            ⚠️ Not currently managed by any bot
+                        </div>
+                        <div style="color: #888; font-size: 0.9em; margin-top: 8px;">
+                            This coin is in your wallet but no active bot is managing it.
+                            Consider starting a bot or selling manually via Binance.
+                        </div>
+                    `}
+                </div>
+                
+                <!-- Position Details -->
+                ${data.position_details && data.position_details.length > 0 ? `
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-top: 15px;">
+                        <h4 style="margin: 0 0 10px 0;">📋 Position Details</h4>
+                        ${data.position_details.map(pos => `
+                            <div style="background: #16161f; padding: 10px; border-radius: 6px; margin-top: 8px;">
+                                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; font-size: 0.9em;">
+                                    <div>
+                                        <span style="color: #888;">Entry Price:</span>
+                                        <span style="font-weight: bold; margin-left: 5px;">$${pos.entry_price?.toFixed(2) || 'N/A'}</span>
+                                    </div>
+                                    <div>
+                                        <span style="color: #888;">Stop Loss:</span>
+                                        <span style="font-weight: bold; margin-left: 5px; color: #f44336;">$${pos.stop_loss?.toFixed(2) || 'N/A'}</span>
+                                    </div>
+                                    <div>
+                                        <span style="color: #888;">Take Profit:</span>
+                                        <span style="font-weight: bold; margin-left: 5px; color: #4caf50;">$${pos.take_profit?.toFixed(2) || 'N/A'}</span>
+                                    </div>
+                                    <div>
+                                        <span style="color: #888;">Position:</span>
+                                        <span style="font-weight: bold; margin-left: 5px;">${pos.position || 'N/A'}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : ''}
+                
+                <!-- Recent Trades -->
+                ${data.trade_history && data.trade_history.length > 0 ? `
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-top: 15px;">
+                        <h4 style="margin: 0 0 10px 0;">📜 Recent Trade History</h4>
+                        <div style="max-height: 200px; overflow-y: auto;">
+                            ${data.trade_history.map(trade => `
+                                <div style="background: #16161f; padding: 8px; border-radius: 4px; margin-top: 6px; font-size: 0.85em; font-family: monospace;">
+                                    ${trade}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                ` : `
+                    <div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-top: 15px; text-align: center; color: #888;">
+                        No recent trade history for this coin
+                    </div>
+                `}
+            `;
+        }
+        
         // Close modal on outside click
         window.onclick = function(event) {
             if (event.target.classList.contains('modal')) {
@@ -721,11 +2001,183 @@ This will halt all trading immediately.')) return;
             }
         }
         
+        // Logs functionality
+        function refreshLogs() {
+            const botFilter = document.getElementById('log-bot-filter').value;
+            const typeFilter = document.getElementById('log-type-filter').value;
+            const searchFilter = document.getElementById('log-search').value;
+            
+            let url = '/api/logs?limit=200';
+            if (botFilter) url += `&bot_id=${botFilter}`;
+            if (typeFilter) url += `&type=${typeFilter}`;
+            if (searchFilter) url += `&search=${encodeURIComponent(searchFilter)}`;
+            
+            fetch(url)
+                .then(response => response.json())
+                .then(result => {
+                    if (!result.success) {
+                        document.getElementById('logs-container').innerHTML = 
+                            '<div style="color: #f44336;">Error loading logs</div>';
+                        return;
+                    }
+                    
+                    const logsContainer = document.getElementById('logs-container');
+                    
+                    if (result.logs.length === 0) {
+                        logsContainer.innerHTML = '<div style="color: #888; text-align: center;">No logs found</div>';
+                        return;
+                    }
+                    
+                    // Update bot filter dropdown
+                    const botIds = [...new Set(result.logs.map(log => log.bot_id))];
+                    const currentBotFilter = document.getElementById('log-bot-filter').value;
+                    const botFilterHtml = '<option value="">All Bots</option>' + 
+                        botIds.map(id => `<option value="${id}" ${id === currentBotFilter ? 'selected' : ''}>Bot ${id}</option>`).join('');
+                    document.getElementById('log-bot-filter').innerHTML = botFilterHtml;
+                    
+                    // Render logs
+                    logsContainer.innerHTML = result.logs.map(log => {
+                        let color = '#fff';
+                        let icon = '';
+                        
+                        switch(log.type) {
+                            case 'buy': color = '#4caf50'; icon = '🟢'; break;
+                            case 'sell': color = '#f44336'; icon = '🔴'; break;
+                            case 'signal': color = '#2196f3'; icon = '📊'; break;
+                            case 'error': color = '#ff5722'; icon = '❌'; break;
+                            case 'hold': color = '#888'; icon = '⏸️'; break;
+                            default: color = '#aaa'; icon = 'ℹ️';
+                        }
+                        
+                        return `
+                            <div style="margin-bottom: 8px; padding: 8px; background: #1a1a2e; border-radius: 4px; border-left: 3px solid ${color};">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                                    <span style="color: #888; font-size: 0.9em;">${formatDateTime(log.timestamp)}</span>
+                                    <span style="color: ${color}; font-weight: bold;">${icon} Bot ${log.bot_id} | ${log.level}</span>
+                                </div>
+                                <div style="color: ${color};">${log.message}</div>
+                            </div>
+                        `;
+                    }).join('');
+                })
+                .catch(error => {
+                    console.error('Error fetching logs:', error);
+                    document.getElementById('logs-container').innerHTML = 
+                        '<div style="color: #f44336;">Connection error</div>';
+                });
+        }
+        
+        function clearLogFilters() {
+            document.getElementById('log-bot-filter').value = '';
+            document.getElementById('log-type-filter').value = '';
+            document.getElementById('log-search').value = '';
+            refreshLogs();
+        }
+        
+        // Sentiment Analysis Dashboard
+        function refreshSentiment() {
+            fetch('/api/sentiment')
+                .then(response => response.json())
+                .then(result => {
+                    if (!result.success) {
+                        console.error('Sentiment error:', result.error);
+                        return;
+                    }
+                    
+                    // Update sentiment summary
+                    const summary = result.sentiment_summary;
+                    document.getElementById('sentiment-positive').textContent = summary.Positive_pct ? summary.Positive_pct + '%' : '0%';
+                    document.getElementById('sentiment-positive-count').textContent = summary.Positive + ' articles';
+                    document.getElementById('sentiment-negative').textContent = summary.Negative_pct ? summary.Negative_pct + '%' : '0%';
+                    document.getElementById('sentiment-negative-count').textContent = summary.Negative + ' articles';
+                    document.getElementById('sentiment-neutral').textContent = summary.Neutral_pct ? summary.Neutral_pct + '%' : '0%';
+                    document.getElementById('sentiment-neutral-count').textContent = summary.Neutral + ' articles';
+                    document.getElementById('sentiment-total').textContent = summary.total;
+                    
+                    // Render recommendations
+                    renderRecommendations(result.recommendations || []);
+                    
+                    // Render recent analyses
+                    renderAnalyses(result.recent_analyses || []);
+                })
+                .catch(error => {
+                    console.error('Error fetching sentiment:', error);
+                });
+        }
+        
+        function renderRecommendations(recommendations) {
+            const list = document.getElementById('recommendations-list');
+            
+            if (recommendations.length === 0) {
+                list.innerHTML = '<div class="empty-state">No recommendations yet...</div>';
+                return;
+            }
+            
+            list.innerHTML = recommendations.map(rec => {
+                const time = formatDateTime(rec.timestamp);
+                const signalColor = rec.signal === 'BUY' ? '#4caf50' : '#f44336';
+                const sentimentEmoji = rec.sentiment === 'Positive' ? '🟢' : (rec.sentiment === 'Negative' ? '🔴' : '⚪');
+                
+                return `
+                    <div style="background: #2a2a2a; padding: 12px; border-radius: 6px; margin-bottom: 10px; border-left: 3px solid ${signalColor};">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <div style="font-weight: bold; color: ${signalColor};">${rec.signal} ${rec.symbols.join(', ')}</div>
+                            <div style="color: #888; font-size: 0.85em;">${time}</div>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                            <span>${sentimentEmoji} ${rec.sentiment}</span>
+                            <span style="color: #ffa726;">⭐ ${rec.confidence}% confidence</span>
+                        </div>
+                        <div style="color: #ccc; font-size: 0.9em; font-style: italic;">${rec.reasoning}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        function renderAnalyses(analyses) {
+            const list = document.getElementById('analyses-list');
+            
+            if (analyses.length === 0) {
+                list.innerHTML = '<div class="empty-state">No analyses yet...</div>';
+                return;
+            }
+            
+            list.innerHTML = analyses.map(analysis => {
+                const time = formatDateTime(analysis.timestamp);
+                const signalColor = analysis.signal === 'BUY' ? '#4caf50' : (analysis.signal === 'SELL' ? '#f44336' : '#888');
+                const sentimentColor = analysis.sentiment === 'Positive' ? '#4caf50' : (analysis.sentiment === 'Negative' ? '#f44336' : '#888');
+                
+                return `
+                    <div style="background: #2a2a2a; padding: 10px; border-radius: 6px; margin-bottom: 8px; font-size: 0.9em;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                            <div style="font-weight: 500; color: #fff;">${analysis.article.substring(0, 60)}${analysis.article.length > 60 ? '...' : ''}</div>
+                            <div style="color: #888; font-size: 0.85em;">${time}</div>
+                        </div>
+                        <div style="display: flex; gap: 15px; color: #ccc;">
+                            <span style="color: ${signalColor};">📊 ${analysis.signal}</span>
+                            <span style="color: ${sentimentColor};">${analysis.sentiment}</span>
+                            <span style="color: #ffa726;">${analysis.confidence}%</span>
+                            ${analysis.symbols.length > 0 ? '<span>💹 ' + analysis.symbols.slice(0, 3).join(', ') + '</span>' : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
         // Initial update
         updateDashboard();
+        refreshLogs();
+        refreshSentiment();
         
         // Auto-refresh every 5 seconds
         setInterval(updateDashboard, 5000);
+        setInterval(refreshLogs, 10000); // Refresh logs every 10 seconds
+        setInterval(refreshSentiment, 30000); // Refresh sentiment every 30 seconds
+        setInterval(updateServerInfo, 1000); // Update uptime every second
+        
+        // Verify dashboard loaded
+        console.log('✅ Dashboard JavaScript loaded successfully');
+        console.log('✅ Modal functions available:', typeof showAddBotModal === 'function');
     </script>
 </body>
 </html>
