@@ -406,15 +406,21 @@ class BotRunner:
                     self.logger.info(f"   Quantity: {quantity:.6f}")
                     self.logger.info(f"   Amount: ${self.trade_amount:.2f}")
                     
-                    # Send SMS notification
-                    self.sms_notifier.send_trade_notification({
+                    # Send SMS notification (with AI reasoning if available)
+                    notification_data = {
                         'action': 'BUY',
                         'symbol': self.symbol,
                         'price': current_price,
                         'quantity': quantity,
                         'amount': self.trade_amount,
                         'bot_name': self.bot_name
-                    })
+                    }
+                    
+                    # Add AI reasoning if provided
+                    if signal_data and 'reasoning' in signal_data:
+                        notification_data['reasoning'] = signal_data['reasoning']
+                    
+                    self.sms_notifier.send_trade_notification(notification_data)
                     
                     return True
             
@@ -443,8 +449,8 @@ class BotRunner:
                         self.logger.info(f"   Exit: ${current_price:.2f}")
                         self.logger.info(f"   Profit: ${profit:.2f} ({profit_pct:+.2f}%)")
                         
-                        # Send SMS notification
-                        self.sms_notifier.send_trade_notification({
+                        # Send SMS notification (with AI reasoning if available)
+                        notification_data = {
                             'action': 'SELL',
                             'symbol': self.symbol,
                             'price': current_price,
@@ -453,7 +459,13 @@ class BotRunner:
                             'profit': profit,
                             'profit_percent': profit_pct,
                             'bot_name': self.bot_name
-                        })
+                        }
+                        
+                        # Add AI reasoning if provided
+                        if signal_data and 'reasoning' in signal_data:
+                            notification_data['reasoning'] = signal_data['reasoning']
+                        
+                        self.sms_notifier.send_trade_notification(notification_data)
                         
                         # Notify strategy about position close (for AI strategies)
                         if hasattr(self.strategy, 'clear_position'):

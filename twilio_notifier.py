@@ -47,7 +47,8 @@ class TwilioNotifier:
                 'amount': 100.00,
                 'bot_name': 'AI Trader',
                 'profit': 5.20 (optional, for sells),
-                'profit_percent': 5.2 (optional, for sells)
+                'profit_percent': 5.2 (optional, for sells),
+                'reasoning': 'AI reasoning for the trade' (optional)
             }
         """
         if not self.client:
@@ -94,6 +95,7 @@ class TwilioNotifier:
         quantity = trade_data['quantity']
         amount = trade_data['amount']
         bot_name = trade_data.get('bot_name', 'Trading Bot')
+        reasoning = trade_data.get('reasoning', None)
         
         if action == 'BUY':
             emoji = '🟢'
@@ -120,6 +122,15 @@ class TwilioNotifier:
         else:
             message = f"📊 TRADE ALERT - {bot_name}\n\n"
             message += f"{action}: {symbol} @ ${price:,.2f}"
+        
+        # Add AI reasoning if provided (keep it under 400 chars to avoid SMS length issues)
+        if reasoning:
+            # Truncate reasoning if too long
+            max_reasoning_length = 400
+            if len(reasoning) > max_reasoning_length:
+                reasoning = reasoning[:max_reasoning_length-3] + "..."
+            
+            message += f"\n\n💡 Reasoning:\n{reasoning}"
         
         return message
     
