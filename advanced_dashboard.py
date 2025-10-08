@@ -30,7 +30,8 @@ class BotManager:
         )
         
         # Auto-create bots for orphaned coins on startup
-        self._auto_create_bots_for_orphaned_coins()
+        # DISABLED: Uncomment the line below to enable auto-manager
+        # self._auto_create_bots_for_orphaned_coins()
     
     def get_bots(self):
         """Load all active bots from file and check real status"""
