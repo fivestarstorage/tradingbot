@@ -331,17 +331,27 @@ class BotRunner:
                     self.logger.warning("=" * 70)
                     return False
                 
-                # If we already have a position, this will ADD to it
+                # Determine how much to invest
                 if self.position:
+                    # ADDING TO EXISTING POSITION
+                    # Use available USDT to buy more (up to 50% of available for safety)
+                    amount_to_invest = min(available_usdt * 0.5, available_usdt - 20)  # Keep $20 buffer
+                    amount_to_invest = max(10, amount_to_invest)  # At least $10
+                    
                     self.logger.info("=" * 70)
                     self.logger.info("📈 ADDING TO EXISTING POSITION")
                     self.logger.info(f"   Current entry: ${self.entry_price:.2f}")
                     self.logger.info(f"   New buy price: ${current_price:.2f}")
                     self.logger.info(f"   Available USDT: ${available_usdt:.2f}")
+                    self.logger.info(f"   Will invest: ${amount_to_invest:.2f} (50% of available)")
                     self.logger.info("=" * 70)
+                    
+                    if amount_to_invest < 10:
+                        self.logger.warning("⚠️  Not enough USDT to add to position (< $10)")
+                        self.logger.warning(f"   Available: ${available_usdt:.2f}")
+                        return False
                 
-                # Determine how much to invest
-                if not self.has_traded:
+                elif not self.has_traded:
                     # FIRST TRADE: Use trade_amount as initial investment
                     amount_to_invest = self.trade_amount
                     required_balance = amount_to_invest * 1.01  # +1% for fees
@@ -371,7 +381,7 @@ class BotRunner:
                     self.initial_investment = amount_to_invest
                     
                 else:
-                    # SUBSEQUENT TRADES: Use ALL available USDT from previous sell
+                    # SUBSEQUENT TRADES AFTER SELL: Use ALL available USDT from previous sell
                     # This trades the same money back and forth (sell high, buy low)
                     amount_to_invest = available_usdt * 0.99  # Leave 1% for fees
                     
