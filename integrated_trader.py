@@ -572,14 +572,15 @@ class BotRunner:
                     self.execute_trade(signal, current_price, signal_data)
                 
                 # Wait before next check
-                time.sleep(60)
+                # 60 = 1 minute, 300 = 5 minutes, 900 = 15 minutes, 3600 = 1 hour
+                time.sleep(900)  # Check every 15 minutes
             
             except KeyboardInterrupt:
                 self.logger.info("\n⏹️ Bot stopped by user")
                 break
             except Exception as e:
                 self.logger.error(f"Error in main loop: {e}")
-                time.sleep(60)
+                time.sleep(900)  # Wait 15 minutes before retry
         
         # Summary
         self.logger.info("=" * 70)
