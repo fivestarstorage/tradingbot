@@ -181,7 +181,20 @@ class BotManager:
                         try:
                             ticker = self.client.client.get_symbol_ticker(symbol=pos_data['symbol'])
                             current_price = float(ticker['price'])
-                        except:
+                            
+                            # Sanity check: If price seems way off from entry price, log warning
+                            entry_price = pos_data.get('entry_price', 0)
+                            if entry_price > 0:
+                                price_ratio = current_price / entry_price
+                                if price_ratio > 10 or price_ratio < 0.1:  # More than 10x change
+                                    print(f"⚠️  Warning: {symbol} price seems off!")
+                                    print(f"   Current: ${current_price:.8f}")
+                                    print(f"   Entry: ${entry_price:.8f}")
+                                    print(f"   Ratio: {price_ratio:.2f}x")
+                                    # Use entry price as fallback if current seems wrong
+                                    current_price = entry_price
+                        except Exception as e:
+                            print(f"⚠️  Error fetching price for {symbol}: {e}")
                             current_price = pos_data.get('entry_price', 0)
                         
                         # Get account balance for this crypto
