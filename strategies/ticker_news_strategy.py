@@ -281,18 +281,19 @@ Be conservative - only recommend BUY/SELL with high confidence."""
                         
                         # Apply confidence thresholds
                         if signal == 'BUY' and confidence >= self.min_buy_confidence:
+                            # Allow adding to positions! Remove the position check
                             if self.current_position:
-                                logger.info(f"📊 Already in position, ignoring BUY signal")
-                                return {'signal': 'HOLD', 'confidence': confidence, 'reasoning': 'Already in position'}
+                                logger.info(f"🟢 BUY Signal: {confidence}% confidence (will ADD to existing position)")
                             else:
                                 logger.info(f"🟢 BUY Signal: {confidence}% confidence")
-                                return {
-                                    'signal': 'BUY',
-                                    'confidence': confidence,
-                                    'reasoning': analysis['reasoning'],
-                                    'sentiment': analysis.get('sentiment', 'Positive'),
-                                    'urgency': analysis.get('urgency', 'medium')
-                                }
+                            
+                            return {
+                                'signal': 'BUY',
+                                'confidence': confidence,
+                                'reasoning': analysis['reasoning'],
+                                'sentiment': analysis.get('sentiment', 'Positive'),
+                                'urgency': analysis.get('urgency', 'medium')
+                            }
                         
                         elif signal == 'SELL' and confidence >= self.min_sell_confidence:
                             if not self.current_position:
