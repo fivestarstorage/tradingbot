@@ -348,13 +348,24 @@ class BotManager:
                     print(f"      Strategy: Ticker News Trading")
                     print(f"      Allocated USDT: ${allocation:.2f}")
                     print(f"      Purpose: Manage existing {coin['asset']} + buy more if needed")
+                    
+                    # AUTO-START the bot immediately!
+                    print(f"      🚀 Starting bot...")
+                    success, message = self.start_bot(new_bot['id'])
+                    if success:
+                        print(f"      ✅ Bot started successfully!")
+                    else:
+                        print(f"      ⚠️  Failed to start: {message}")
+                    
+                    # Small delay between bot starts to avoid overwhelming system
+                    import time
+                    time.sleep(2)
                 
                 print(f"\n💰 Total USDT Allocated: ${total_allocated:.2f}")
                 print(f"💰 Remaining USDT: ${available_usdt - total_allocated:.2f}")
-                print(f"\n💡 Auto-created bots are STOPPED by default.")
-                print(f"   Start them via dashboard to begin management.")
-                print(f"   They will detect existing positions and manage them.")
-                print(f"   Allocated USDT will be used for buying MORE if AI recommends.\n")
+                print(f"\n🚀 All auto-created bots have been STARTED automatically!")
+                print(f"   They are now monitoring news and managing positions.")
+                print(f"   Check dashboard to see them running: http://localhost:5001\n")
             else:
                 print("   ✅ All coins are already managed or have 0 balance\n")
         
