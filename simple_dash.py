@@ -99,6 +99,55 @@ class BotManager:
             return True, 'Bot stopped'
         except Exception as e:
             return False, str(e)
+    
+    def update_bot(self, bot_id, updates):
+        """Update bot settings"""
+        try:
+            bots = self.get_bots()
+            bot = next((b for b in bots if b['id'] == bot_id), None)
+            if not bot:
+                return False, 'Bot not found'
+            
+            # Update fields
+            bot.update(updates)
+            
+            with open(self.bots_file, 'w') as f:
+                json.dump(bots, f, indent=2)
+            
+            return True, 'Bot updated'
+        except Exception as e:
+            return False, str(e)
+    
+    def get_bot_details(self, bot_id):
+        """Get detailed bot info including logs"""
+        try:
+            bots = self.get_bots()
+            bot = next((b for b in bots if b['id'] == bot_id), None)
+            if not bot:
+                return None
+            
+            # Get recent log entries
+            log_file = f'bot_{bot_id}.log'
+            recent_logs = []
+            if os.path.exists(log_file):
+                with open(log_file, 'r') as f:
+                    lines = f.readlines()[-20:]  # Last 20 lines
+                    recent_logs = [line.strip() for line in lines]
+            
+            # Get position info from logs
+            position_info = None
+            for line in reversed(recent_logs):
+                if 'Position: LONG' in line:
+                    position_info = line
+                    break
+            
+            return {
+                'bot': bot,
+                'recent_logs': recent_logs,
+                'position_info': position_info
+            }
+        except Exception as e:
+            return None
 
 bot_manager = BotManager()
 
@@ -139,6 +188,20 @@ def start_bot(bot_id):
 @app.route('/api/bot/<int:bot_id>/stop', methods=['POST'])
 def stop_bot(bot_id):
     success, message = bot_manager.stop_bot(bot_id)
+    return jsonify({'success': success, 'message': message})
+
+@app.route('/api/bot/<int:bot_id>/details')
+def get_bot_details(bot_id):
+    details = bot_manager.get_bot_details(bot_id)
+    if details:
+        return jsonify({'success': True, 'data': details})
+    else:
+        return jsonify({'success': False, 'error': 'Bot not found'})
+
+@app.route('/api/bot/<int:bot_id>/update', methods=['POST'])
+def update_bot(bot_id):
+    data = request.get_json()
+    success, message = bot_manager.update_bot(bot_id, data)
     return jsonify({'success': success, 'message': message})
 
 @app.route('/api/send_alert', methods=['POST'])
@@ -414,6 +477,70 @@ HTML = '''<!DOCTYPE html>
             padding: 60px 20px;
             color: #999;
         }
+        
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 0;
+            max-width: 700px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 24px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .modal-header h2 {
+            margin: 0;
+            font-size: 20px;
+        }
+        
+        .modal-header h3 {
+            margin: 0 0 12px 0;
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 32px;
+            color: #999;
+            cursor: pointer;
+            line-height: 1;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+        }
+        
+        .modal-close:hover {
+            color: #333;
+        }
+        
+        .modal-body {
+            padding: 24px;
+        }
     </style>
 </head>
 <body>
@@ -462,6 +589,61 @@ HTML = '''<!DOCTYPE html>
             </div>
             <div id="bots-container">
                 <div class="empty-state">Loading...</div>
+            </div>
+        </div>
+        
+        <!-- Bot Details Modal -->
+        <div id="details-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="details-bot-name">Bot Details</h2>
+                    <button class="modal-close" onclick="hideDetailsModal()">×</button>
+                </div>
+                <div class="modal-body">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                        <div><strong>Symbol:</strong> <span id="details-symbol"></span></div>
+                        <div><strong>Strategy:</strong> <span id="details-strategy"></span></div>
+                        <div><strong>Budget:</strong> <span id="details-budget"></span></div>
+                        <div><strong>Trades:</strong> <span id="details-trades"></span></div>
+                        <div><strong>Profit:</strong> <span id="details-profit"></span></div>
+                        <div><strong>Status:</strong> <span id="details-status"></span></div>
+                    </div>
+                    
+                    <h3>Current Position</h3>
+                    <div id="details-position" style="background: #f5f5f5; padding: 10px; border-radius: 6px; margin-bottom: 20px; font-family: monospace;"></div>
+                    
+                    <h3>Recent Activity (Last 20 lines)</h3>
+                    <div id="details-logs" style="background: #1e1e1e; color: #00ff00; padding: 12px; border-radius: 6px; max-height: 300px; overflow-y: auto; font-family: monospace; font-size: 11px;"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Edit Bot Modal -->
+        <div id="edit-modal" class="modal">
+            <div class="modal-content" style="max-width: 400px;">
+                <div class="modal-header">
+                    <h2>Edit Bot</h2>
+                    <button class="modal-close" onclick="hideEditModal()">×</button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="edit-bot-id">
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: 600;">Bot Name:</label>
+                        <input type="text" id="edit-bot-name" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+                    </div>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: 600;">Trade Amount (USDT):</label>
+                        <input type="number" id="edit-bot-amount" min="1" step="1" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+                        <small style="color: #666;">How much USDT this bot uses per trade</small>
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-primary" onclick="saveBot()" style="flex: 1;">Save Changes</button>
+                        <button class="btn btn-secondary" onclick="hideEditModal()" style="flex: 1;">Cancel</button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -568,6 +750,10 @@ HTML = '''<!DOCTYPE html>
                     
                     <div class="bot-stats">
                         <div class="bot-stat">
+                            <div class="bot-stat-label">Budget</div>
+                            <div class="bot-stat-value">$${(bot.trade_amount || 0).toFixed(0)}</div>
+                        </div>
+                        <div class="bot-stat">
                             <div class="bot-stat-label">Trades</div>
                             <div class="bot-stat-value">${bot.trades || 0}</div>
                         </div>
@@ -578,6 +764,8 @@ HTML = '''<!DOCTYPE html>
                     </div>
                     
                     <div class="bot-actions">
+                        <button class="btn btn-sm" style="background: #667eea;" onclick="showBotDetails(${bot.id})">View</button>
+                        <button class="btn btn-sm" style="background: #f0ad4e;" onclick="showEditBot(${bot.id})">Edit</button>
                         ${bot.status === 'running' ? 
                             `<button class="btn btn-sm btn-danger" onclick="stopBot(${bot.id})">Stop</button>` :
                             `<button class="btn btn-sm btn-success" onclick="startBot(${bot.id})">Start</button>`
@@ -588,23 +776,35 @@ HTML = '''<!DOCTYPE html>
         }
         
         function startBot(id) {
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = 'Starting...';
+            
             fetch(`/api/bot/${id}/start`, { method: 'POST' })
                 .then(r => r.json())
                 .then(data => {
-                    alert(data.message);
-                    updateDashboard();
+                    setTimeout(() => updateDashboard(), 1000);
+                })
+                .catch(e => {
+                    btn.disabled = false;
+                    btn.textContent = 'Start';
                 });
         }
         
         function stopBot(id) {
-            if (confirm('Stop this bot?')) {
-                fetch(`/api/bot/${id}/stop`, { method: 'POST' })
-                    .then(r => r.json())
-                    .then(data => {
-                        alert(data.message);
-                        updateDashboard();
-                    });
-            }
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = 'Stopping...';
+            
+            fetch(`/api/bot/${id}/stop`, { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    setTimeout(() => updateDashboard(), 1000);
+                })
+                .catch(e => {
+                    btn.disabled = false;
+                    btn.textContent = 'Stop';
+                });
         }
         
         function sendAlert() {
@@ -615,6 +815,88 @@ HTML = '''<!DOCTYPE html>
                         alert(data.success ? '✅ Alert sent!' : '❌ Error: ' + data.error);
                     });
             }
+        }
+        
+        // Bot details modal
+        function showBotDetails(id) {
+            fetch(`/api/bot/${id}/details`)
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) return alert('Error loading bot details');
+                    
+                    const bot = data.data.bot;
+                    const logs = data.data.recent_logs;
+                    const position = data.data.position_info;
+                    
+                    document.getElementById('details-bot-name').textContent = bot.name;
+                    document.getElementById('details-symbol').textContent = bot.symbol;
+                    document.getElementById('details-strategy').textContent = bot.strategy.toUpperCase();
+                    document.getElementById('details-budget').textContent = '$' + (bot.trade_amount || 0).toFixed(2);
+                    document.getElementById('details-trades').textContent = bot.trades || 0;
+                    document.getElementById('details-profit').textContent = '$' + (bot.profit || 0).toFixed(2);
+                    document.getElementById('details-status').textContent = bot.status.toUpperCase();
+                    
+                    document.getElementById('details-position').textContent = position || 'No active position';
+                    
+                    const logsHtml = logs.length > 0 ? 
+                        logs.map(l => `<div style="padding: 4px 0; font-size: 12px; font-family: monospace;">${l}</div>`).join('') :
+                        '<div>No logs available</div>';
+                    document.getElementById('details-logs').innerHTML = logsHtml;
+                    
+                    document.getElementById('details-modal').style.display = 'flex';
+                });
+        }
+        
+        function hideDetailsModal() {
+            document.getElementById('details-modal').style.display = 'none';
+        }
+        
+        // Edit bot modal
+        function showEditBot(id) {
+            fetch(`/api/bot/${id}/details`)
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) return alert('Error loading bot');
+                    
+                    const bot = data.data.bot;
+                    document.getElementById('edit-bot-id').value = bot.id;
+                    document.getElementById('edit-bot-name').value = bot.name;
+                    document.getElementById('edit-bot-amount').value = bot.trade_amount || 0;
+                    
+                    document.getElementById('edit-modal').style.display = 'flex';
+                });
+        }
+        
+        function hideEditModal() {
+            document.getElementById('edit-modal').style.display = 'none';
+        }
+        
+        function saveBot() {
+            const id = document.getElementById('edit-bot-id').value;
+            const name = document.getElementById('edit-bot-name').value;
+            const amount = parseFloat(document.getElementById('edit-bot-amount').value);
+            
+            if (!name || amount <= 0) {
+                return alert('Please enter valid values');
+            }
+            
+            fetch(`/api/bot/${id}/update`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    name: name,
+                    trade_amount: amount
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    hideEditModal();
+                    updateDashboard();
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            });
         }
         
         // Auto-refresh every 30 seconds
