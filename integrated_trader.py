@@ -50,8 +50,8 @@ class BotRunner:
         self.strategy_name = strategy_name
         self.trade_amount = trade_amount
         
-        # Setup logging
-        log_file = f'bot_{bot_id}_{datetime.now().strftime("%Y%m%d")}.log'
+        # Setup logging (single log file per bot, no dates)
+        log_file = f'bot_{bot_id}.log'
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',

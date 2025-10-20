@@ -95,14 +95,9 @@ class BotManager:
             
             if f'bot_{bot_id}' not in check.stdout:
                 # Check if bot is actually running (might have crashed)
-                # Look for dated log files
-                import glob
-                log_pattern = f'bot_{bot_id}_*.log'
-                log_files = glob.glob(os.path.join(os.getcwd(), log_pattern))
-                
+                log_file = os.path.join(os.getcwd(), f'bot_{bot_id}.log')
                 error_msg = 'Failed to start. '
-                if log_files:
-                    log_file = max(log_files, key=os.path.getmtime)
+                if os.path.exists(log_file):
                     try:
                         with open(log_file, 'r') as f:
                             last_lines = f.readlines()[-5:]
@@ -166,27 +161,16 @@ class BotManager:
             if not bot:
                 return None
             
-            # Get recent log entries (log files have dates in filename: bot_X_YYYYMMDD.log)
-            # Find the most recent log file for this bot
-            log_pattern = f'bot_{bot_id}_*.log'
-            log_dir = os.getcwd()
-            import glob
-            log_files = glob.glob(os.path.join(log_dir, log_pattern))
-            
+            # Get recent log entries (single log file per bot)
+            log_file = os.path.join(os.getcwd(), f'bot_{bot_id}.log')
             recent_logs = []
             profit_history = []
             last_check_time = None
-            log_file = None
             
-            if log_files:
-                # Get the most recent log file
-                log_file = max(log_files, key=os.path.getmtime)
-                print(f"[DEBUG] Found log file: {log_file}")
-            else:
-                print(f"[DEBUG] No log files found matching: {log_pattern}")
-                log_file = os.path.join(log_dir, f'bot_{bot_id}.log')  # fallback
+            print(f"[DEBUG] Looking for log file: {log_file}")
+            print(f"[DEBUG] File exists: {os.path.exists(log_file)}")
             
-            if log_file and os.path.exists(log_file):
+            if os.path.exists(log_file):
                 with open(log_file, 'r') as f:
                     lines = f.readlines()
                     recent_logs = [line.strip() for line in lines[-20:]]
@@ -275,16 +259,13 @@ def overview():
         account = bot_manager.get_account_info()
         
         # Add last check time for each bot
-        import glob
         for bot in bots:
             if bot['status'] == 'running':
-                # Find most recent log file (they have dates: bot_X_YYYYMMDD.log)
-                log_pattern = f"bot_{bot['id']}_*.log"
-                log_files = glob.glob(os.path.join(os.getcwd(), log_pattern))
+                # Check single log file per bot
+                log_file = os.path.join(os.getcwd(), f"bot_{bot['id']}.log")
                 
                 last_check = None
-                if log_files:
-                    log_file = max(log_files, key=os.path.getmtime)
+                if os.path.exists(log_file):
                     try:
                         with open(log_file, 'r') as f:
                             lines = f.readlines()
