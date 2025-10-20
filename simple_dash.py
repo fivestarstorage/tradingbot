@@ -119,7 +119,7 @@ class BotManager:
             return False, str(e)
     
     def get_bot_details(self, bot_id):
-        """Get detailed bot info including logs"""
+        """Get detailed bot info including logs and profit history"""
         try:
             bots = self.get_bots()
             bot = next((b for b in bots if b['id'] == bot_id), None)
@@ -129,10 +129,33 @@ class BotManager:
             # Get recent log entries
             log_file = f'bot_{bot_id}.log'
             recent_logs = []
+            profit_history = []
+            
             if os.path.exists(log_file):
                 with open(log_file, 'r') as f:
-                    lines = f.readlines()[-20:]  # Last 20 lines
-                    recent_logs = [line.strip() for line in lines]
+                    lines = f.readlines()
+                    recent_logs = [line.strip() for line in lines[-20:]]
+                    
+                    # Extract profit history from trades
+                    for line in lines:
+                        if 'SELL' in line and 'Profit:' in line:
+                            try:
+                                # Extract timestamp and profit
+                                parts = line.split()
+                                timestamp = f"{parts[0]} {parts[1]}"
+                                
+                                # Find profit value
+                                for i, part in enumerate(parts):
+                                    if 'Profit:' in part and i + 1 < len(parts):
+                                        profit_str = parts[i + 1].replace('$', '').replace('+', '')
+                                        profit = float(profit_str)
+                                        profit_history.append({
+                                            'time': timestamp,
+                                            'profit': profit
+                                        })
+                                        break
+                            except:
+                                continue
             
             # Get position info from logs
             position_info = None
@@ -141,10 +164,14 @@ class BotManager:
                     position_info = line
                     break
             
+            # Keep last 50 profit data points
+            profit_history = profit_history[-50:]
+            
             return {
                 'bot': bot,
                 'recent_logs': recent_logs,
-                'position_info': position_info
+                'position_info': position_info,
+                'profit_history': profit_history
             }
         except Exception as e:
             return None
@@ -244,6 +271,7 @@ HTML = '''<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trading Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
@@ -609,6 +637,11 @@ HTML = '''<!DOCTYPE html>
                         <div><strong>Status:</strong> <span id="details-status"></span></div>
                     </div>
                     
+                    <h3>📈 Profit Performance</h3>
+                    <div style="background: white; padding: 15px; border-radius: 6px; margin-bottom: 20px; height: 250px;">
+                        <canvas id="botProfitChart"></canvas>
+                    </div>
+                    
                     <h3>Current Position</h3>
                     <div id="details-position" style="background: #f5f5f5; padding: 10px; border-radius: 6px; margin-bottom: 20px; font-family: monospace;"></div>
                     
@@ -675,53 +708,96 @@ HTML = '''<!DOCTYPE html>
         }
         
         function updateChart(bots) {
-            const labels = bots.map(b => b.symbol.replace('USDT', ''));
-            const profits = bots.map(b => b.profit || 0);
-            
             const ctx = document.getElementById('profitChart').getContext('2d');
             
             if (profitChart) {
                 profitChart.destroy();
             }
             
+            // Create cumulative profit data for each bot
+            const now = new Date();
+            const datasets = bots.map((bot, index) => {
+                const colors = [
+                    'rgb(102, 126, 234)',
+                    'rgb(118, 75, 162)',
+                    'rgb(76, 175, 80)',
+                    'rgb(255, 193, 7)',
+                    'rgb(244, 67, 54)',
+                    'rgb(33, 150, 243)',
+                    'rgb(156, 39, 176)',
+                    'rgb(255, 87, 34)'
+                ];
+                const color = colors[index % colors.length];
+                
+                return {
+                    label: bot.symbol.replace('USDT', ''),
+                    data: [{
+                        x: new Date(now.getTime() - 3600000),
+                        y: 0
+                    }, {
+                        x: now,
+                        y: bot.profit || 0
+                    }],
+                    borderColor: color,
+                    backgroundColor: color.replace('rgb', 'rgba').replace(')', ', 0.1)'),
+                    tension: 0.4,
+                    fill: true,
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                };
+            });
+            
             profitChart = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Profit ($)',
-                        data: profits,
-                        backgroundColor: profits.map(p => p >= 0 ? 'rgba(76, 175, 80, 0.6)' : 'rgba(244, 67, 54, 0.6)'),
-                        borderColor: profits.map(p => p >= 0 ? 'rgba(76, 175, 80, 1)' : 'rgba(244, 67, 54, 1)'),
-                        borderWidth: 2,
-                        borderRadius: 8
-                    }]
-                },
+                type: 'line',
+                data: { datasets: datasets },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
+                    },
                     plugins: {
-                        legend: { display: false },
+                        legend: {
+                            display: true,
+                            position: 'top'
+                        },
                         tooltip: {
                             callbacks: {
                                 label: function(context) {
-                                    return 'Profit: $' + context.parsed.y.toFixed(2);
+                                    return context.dataset.label + ': $' + context.parsed.y.toFixed(2);
                                 }
                             }
                         }
                     },
                     scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'hour',
+                                displayFormats: {
+                                    hour: 'HH:mm'
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Time'
+                            },
+                            grid: { color: 'rgba(0,0,0,0.05)' }
+                        },
                         y: {
                             beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Profit ($)'
+                            },
                             grid: { color: 'rgba(0,0,0,0.05)' },
                             ticks: {
                                 callback: function(value) {
                                     return '$' + value.toFixed(0);
                                 }
                             }
-                        },
-                        x: {
-                            grid: { display: false }
                         }
                     }
                 }
@@ -818,6 +894,8 @@ HTML = '''<!DOCTYPE html>
         }
         
         // Bot details modal
+        let botDetailChart = null;
+        
         function showBotDetails(id) {
             fetch(`/api/bot/${id}/details`)
                 .then(r => r.json())
@@ -827,6 +905,7 @@ HTML = '''<!DOCTYPE html>
                     const bot = data.data.bot;
                     const logs = data.data.recent_logs;
                     const position = data.data.position_info;
+                    const profitHistory = data.data.profit_history || [];
                     
                     document.getElementById('details-bot-name').textContent = bot.name;
                     document.getElementById('details-symbol').textContent = bot.symbol;
@@ -843,8 +922,100 @@ HTML = '''<!DOCTYPE html>
                         '<div>No logs available</div>';
                     document.getElementById('details-logs').innerHTML = logsHtml;
                     
+                    // Render bot profit chart
+                    renderBotChart(profitHistory, bot.name);
+                    
                     document.getElementById('details-modal').style.display = 'flex';
                 });
+        }
+        
+        function renderBotChart(profitHistory, botName) {
+            const ctx = document.getElementById('botProfitChart').getContext('2d');
+            
+            if (botDetailChart) {
+                botDetailChart.destroy();
+            }
+            
+            if (profitHistory.length === 0) {
+                // No data yet
+                ctx.font = '14px sans-serif';
+                ctx.fillStyle = '#999';
+                ctx.textAlign = 'center';
+                ctx.fillText('No trade history yet', ctx.canvas.width / 2, ctx.canvas.height / 2);
+                return;
+            }
+            
+            // Calculate cumulative profit
+            let cumulative = 0;
+            const chartData = profitHistory.map(item => {
+                cumulative += item.profit;
+                return {
+                    x: new Date(item.time),
+                    y: cumulative
+                };
+            });
+            
+            botDetailChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: 'Cumulative Profit',
+                        data: chartData,
+                        borderColor: 'rgb(102, 126, 234)',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        tension: 0.4,
+                        fill: true,
+                        pointRadius: 3,
+                        pointHoverRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        title: {
+                            display: true,
+                            text: `${botName} - Profit Over Time`
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return 'Profit: $' + context.parsed.y.toFixed(2);
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: {
+                                unit: 'day',
+                                displayFormats: {
+                                    day: 'MMM d',
+                                    hour: 'HH:mm'
+                                }
+                            },
+                            title: {
+                                display: true,
+                                text: 'Time'
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Cumulative Profit ($)'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return '$' + value.toFixed(2);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
         }
         
         function hideDetailsModal() {
