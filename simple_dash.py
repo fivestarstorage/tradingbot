@@ -77,24 +77,43 @@ class BotManager:
             # integrated_trader.py uses positional arguments:
             # Usage: python integrated_trader.py <bot_id> <bot_name> <symbol> <strategy> <amount>
             bot_name = bot['name'].replace("'", "'\\''")  # Escape single quotes
-            cmd = f"screen -dmS bot_{bot_id} python3 integrated_trader.py {bot_id} '{bot_name}' {bot['symbol']} {bot['strategy']} {bot['trade_amount']}"
+            cmd = f"cd {os.getcwd()} && screen -dmS bot_{bot_id} python3 integrated_trader.py {bot_id} '{bot_name}' {bot['symbol']} {bot['strategy']} {bot['trade_amount']}"
             
-            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            print(f"[DEBUG] Starting bot {bot_id} with command: {cmd}")
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=os.getcwd())
+            
+            if result.returncode != 0:
+                print(f"[ERROR] Command failed: {result.stderr}")
+                return False, f'Command failed: {result.stderr}'
             
             # Give the screen session a moment to start
-            time.sleep(0.5)
+            time.sleep(1.0)
             
             # Verify it actually started
             check = subprocess.run(['screen', '-list'], capture_output=True, text=True)
+            print(f"[DEBUG] Screen sessions: {check.stdout}")
+            
             if f'bot_{bot_id}' not in check.stdout:
-                return False, f'Failed to start bot. Check logs: tail -f bot_{bot_id}.log'
+                # Check if bot is actually running (might have crashed)
+                log_file = f'bot_{bot_id}.log'
+                error_msg = 'Failed to start. '
+                if os.path.exists(log_file):
+                    with open(log_file, 'r') as f:
+                        last_lines = f.readlines()[-5:]
+                        if last_lines:
+                            error_msg += f"Last log: {last_lines[-1].strip()}"
+                return False, error_msg
             
             bot['status'] = 'running'
             with open(self.bots_file, 'w') as f:
                 json.dump(bots, f, indent=2)
             
-            return True, 'Bot started'
+            print(f"[SUCCESS] Bot {bot_id} started successfully")
+            return True, 'Bot started successfully'
         except Exception as e:
+            print(f"[ERROR] Exception starting bot: {e}")
+            import traceback
+            traceback.print_exc()
             return False, str(e)
     
     def stop_bot(self, bot_id):
