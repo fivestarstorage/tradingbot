@@ -328,6 +328,10 @@ class BotRunner:
                 try:
                     usdt_balance = self.client.get_account_balance('USDT')
                     available_usdt = float(usdt_balance['free']) if usdt_balance else 0
+                    self.logger.info(f"💰 USDT Balance Check:")
+                    self.logger.info(f"   Available: ${available_usdt:.2f}")
+                    self.logger.info(f"   Locked: ${float(usdt_balance.get('locked', 0)):.2f}")
+                    self.logger.info(f"   Total: ${float(usdt_balance.get('free', 0)) + float(usdt_balance.get('locked', 0)):.2f}")
                 except Exception as e:
                     self.logger.error(f"Error checking balance: {e}")
                     available_usdt = 0
@@ -362,6 +366,8 @@ class BotRunner:
                     
                     self.logger.info("💎 FIRST TRADE - Initial Investment")
                     self.logger.info(f"   Investment Amount: ${amount_to_invest:.2f}")
+                    self.logger.info(f"   Required Balance: ${required_balance:.2f} (includes 1% fees)")
+                    self.logger.info(f"   Available Balance: ${available_usdt:.2f}")
                     
                     if available_usdt < required_balance:
                         self.logger.warning("=" * 70)
