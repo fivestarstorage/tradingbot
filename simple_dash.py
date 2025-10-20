@@ -5,6 +5,7 @@ from flask import Flask, jsonify, request
 import json
 import os
 import subprocess
+import time
 from datetime import datetime, timedelta
 from binance_client import BinanceClient
 from config import Config
@@ -73,8 +74,19 @@ class BotManager:
             if not bot:
                 return False, 'Bot not found'
             
-            cmd = f"screen -dmS bot_{bot_id} python3 integrated_trader.py --bot-id {bot_id} --symbol {bot['symbol']} --strategy {bot['strategy']} --amount {bot['trade_amount']}"
-            subprocess.run(cmd, shell=True)
+            # Build command with proper escaping
+            bot_name = bot['name'].replace("'", "'\\''")  # Escape single quotes
+            cmd = f"screen -dmS bot_{bot_id} python3 integrated_trader.py --bot-id {bot_id} --name '{bot_name}' --symbol {bot['symbol']} --strategy {bot['strategy']} --amount {bot['trade_amount']}"
+            
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            
+            # Give the screen session a moment to start
+            time.sleep(0.5)
+            
+            # Verify it actually started
+            check = subprocess.run(['screen', '-list'], capture_output=True, text=True)
+            if f'bot_{bot_id}' not in check.stdout:
+                return False, f'Failed to start bot. Check logs: tail -f bot_{bot_id}.log'
             
             bot['status'] = 'running'
             with open(self.bots_file, 'w') as f:
@@ -859,9 +871,16 @@ HTML = '''<!DOCTYPE html>
             fetch(`/api/bot/${id}/start`, { method: 'POST' })
                 .then(r => r.json())
                 .then(data => {
-                    setTimeout(() => updateDashboard(), 1000);
+                    if (!data.success) {
+                        alert('Failed to start bot: ' + data.message);
+                        btn.disabled = false;
+                        btn.textContent = 'Start';
+                    } else {
+                        setTimeout(() => updateDashboard(), 1500);
+                    }
                 })
                 .catch(e => {
+                    alert('Error: ' + e);
                     btn.disabled = false;
                     btn.textContent = 'Start';
                 });
