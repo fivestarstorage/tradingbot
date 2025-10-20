@@ -162,6 +162,7 @@ class BotManager:
             log_file = f'bot_{bot_id}.log'
             recent_logs = []
             profit_history = []
+            last_check_time = None
             
             if os.path.exists(log_file):
                 with open(log_file, 'r') as f:
@@ -188,6 +189,17 @@ class BotManager:
                                         break
                             except:
                                 continue
+                    
+                    # Find last check time (look for "Generating signal" or "Signal:" in logs)
+                    for line in reversed(lines):
+                        if 'Signal:' in line or 'Generating signal' in line:
+                            try:
+                                parts = line.split()
+                                if len(parts) >= 2:
+                                    last_check_time = f"{parts[0]} {parts[1]}"
+                                    break
+                            except:
+                                continue
             
             # Get position info from logs
             position_info = None
@@ -203,7 +215,8 @@ class BotManager:
                 'bot': bot,
                 'recent_logs': recent_logs,
                 'position_info': position_info,
-                'profit_history': profit_history
+                'profit_history': profit_history,
+                'last_check_time': last_check_time
             }
         except Exception as e:
             return None
@@ -220,6 +233,28 @@ def overview():
     try:
         bots = bot_manager.get_bots()
         account = bot_manager.get_account_info()
+        
+        # Add last check time for each bot
+        for bot in bots:
+            if bot['status'] == 'running':
+                log_file = f"bot_{bot['id']}.log"
+                last_check = None
+                if os.path.exists(log_file):
+                    try:
+                        with open(log_file, 'r') as f:
+                            lines = f.readlines()
+                            # Look for recent signal generation
+                            for line in reversed(lines[-50:]):  # Check last 50 lines
+                                if 'Signal:' in line or 'Generating signal' in line:
+                                    parts = line.split()
+                                    if len(parts) >= 2:
+                                        last_check = f"{parts[0]} {parts[1]}"
+                                        break
+                    except:
+                        pass
+                bot['last_check'] = last_check
+            else:
+                bot['last_check'] = None
         
         total_profit = sum(b.get('profit', 0) for b in bots)
         total_trades = sum(b.get('trades', 0) for b in bots)
@@ -845,7 +880,7 @@ HTML = '''<!DOCTYPE html>
             }
             
             container.innerHTML = bots.map(bot => `
-                <div class="bot-card">
+                <div class="bot-card" data-bot-id="${bot.id}" data-last-check="${bot.last_check || ''}">
                     <div class="bot-info">
                         <div class="bot-name">
                             ${bot.name} 
@@ -853,6 +888,7 @@ HTML = '''<!DOCTYPE html>
                         </div>
                         <div class="bot-details">
                             ${bot.symbol} • ${bot.strategy.toUpperCase()}
+                            ${bot.status === 'running' ? `<br><small style="color: rgba(255,255,255,0.7);">⏱️ Next check: <span class="next-check-timer" id="timer-${bot.id}">calculating...</span></small>` : ''}
                         </div>
                     </div>
                     
@@ -881,7 +917,46 @@ HTML = '''<!DOCTYPE html>
                     </div>
                 </div>
             `).join('');
+            
+            // Start updating countdowns
+            updateCountdowns();
         }
+        
+        function updateCountdowns() {
+            const cards = document.querySelectorAll('.bot-card');
+            
+            cards.forEach(card => {
+                const botId = card.getAttribute('data-bot-id');
+                const lastCheck = card.getAttribute('data-last-check');
+                const timerElem = document.getElementById(`timer-${botId}`);
+                
+                if (!timerElem || !lastCheck) return;
+                
+                try {
+                    // Parse last check time (format: "2025-10-20 14:30:45,123")
+                    const lastCheckDate = new Date(lastCheck.replace(',', '.'));
+                    const nextCheckDate = new Date(lastCheckDate.getTime() + (15 * 60 * 1000)); // +15 minutes
+                    const now = new Date();
+                    
+                    const diff = nextCheckDate - now;
+                    
+                    if (diff <= 0) {
+                        timerElem.textContent = 'checking now...';
+                        timerElem.style.color = '#4caf50';
+                    } else {
+                        const minutes = Math.floor(diff / 60000);
+                        const seconds = Math.floor((diff % 60000) / 1000);
+                        timerElem.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                        timerElem.style.color = 'rgba(255,255,255,0.9)';
+                    }
+                } catch (e) {
+                    timerElem.textContent = 'soon';
+                }
+            });
+        }
+        
+        // Update countdowns every second
+        setInterval(updateCountdowns, 1000);
         
         function startBot(id) {
             const btn = event.target;
