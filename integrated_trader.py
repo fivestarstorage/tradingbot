@@ -98,6 +98,17 @@ class BotRunner:
         # Initialize SMS notifier
         self.sms_notifier = TwilioNotifier()
         
+        # 6-hour summary tracking
+        self.summary_interval = 21600  # 6 hours in seconds
+        self.last_summary_time = time.time()
+        self.summary_stats = {
+            'total_trades': 0,
+            'buys': 0,
+            'sells': 0,
+            'total_profit': 0.0,
+            'period_start_value': 0.0
+        }
+        
         # Position persistence file
         self.position_file = f'bot_{self.bot_id}_position.json'
         self._load_position()
@@ -461,20 +472,10 @@ class BotRunner:
                     self.logger.info(f"   Amount: ${self.trade_amount:.2f}")
                     
                     # Send SMS notification (with AI reasoning if available)
-                    notification_data = {
-                        'action': 'BUY',
-                        'symbol': self.symbol,
-                        'price': current_price,
-                        'quantity': quantity,
-                        'amount': self.trade_amount,
-                        'bot_name': self.bot_name
-                    }
-                    
-                    # Add AI reasoning if provided
-                    if signal_data and 'reasoning' in signal_data:
-                        notification_data['reasoning'] = signal_data['reasoning']
-                    
-                    self.sms_notifier.send_trade_notification(notification_data)
+                    # Track for 6-hour summary (no per-trade SMS)
+                    self.summary_stats['total_trades'] += 1
+                    self.summary_stats['buys'] += 1
+                    self.logger.info(f"📊 Trade tracked in summary stats (no SMS sent)")
                     
                     return True
             
@@ -515,11 +516,11 @@ class BotRunner:
                             'bot_name': self.bot_name
                         }
                         
-                        # Add AI reasoning if provided
-                        if signal_data and 'reasoning' in signal_data:
-                            notification_data['reasoning'] = signal_data['reasoning']
-                        
-                        self.sms_notifier.send_trade_notification(notification_data)
+                        # Track for 6-hour summary (no per-trade SMS)
+                        self.summary_stats['total_trades'] += 1
+                        self.summary_stats['sells'] += 1
+                        self.summary_stats['total_profit'] += profit
+                        self.logger.info(f"📊 Trade tracked in summary stats (no SMS sent)")
                         
                         # Notify strategy about position close (for AI strategies)
                         if hasattr(self.strategy, 'clear_position'):
@@ -546,6 +547,73 @@ class BotRunner:
             self.logger.error(f"Error executing trade: {e}")
         
         return False
+    
+    def check_and_send_summary(self):
+        """Check if 6 hours have passed and send summary SMS"""
+        current_time = time.time()
+        time_elapsed = current_time - self.last_summary_time
+        
+        if time_elapsed >= self.summary_interval:
+            self.logger.info("\n⏰ 6 hours elapsed - sending trading summary...")
+            self.send_summary()
+            
+            # Reset timer and stats
+            self.last_summary_time = current_time
+            self.summary_stats = {
+                'total_trades': 0,
+                'buys': 0,
+                'sells': 0,
+                'total_profit': 0.0,
+                'period_start_value': 0.0
+            }
+    
+    def send_summary(self):
+        """Generate and send trading summary SMS"""
+        try:
+            # Get current account value
+            account_info = self.client.get_account_info()
+            account_value = 0.0
+            
+            if account_info:
+                usdt_balance = account_info.get('usdt_total', 0)
+                account_value = usdt_balance
+                
+                # Add value of crypto holdings
+                crypto_asset = self.symbol.replace('USDT', '')
+                crypto_balance = self.client.get_account_balance(crypto_asset)
+                if crypto_balance:
+                    crypto_amount = float(crypto_balance.get('free', 0)) + float(crypto_balance.get('locked', 0))
+                    if crypto_amount > 0:
+                        current_price = float(self.client.client.get_symbol_ticker(symbol=self.symbol)['price'])
+                        account_value += crypto_amount * current_price
+            
+            # Get current positions
+            positions = []
+            if self.position:
+                positions.append(self.symbol.replace('USDT', ''))
+            
+            # Calculate profit percentage
+            profit_percent = 0.0
+            if account_value > 0 and self.summary_stats['period_start_value'] > 0:
+                profit_percent = ((account_value - self.summary_stats['period_start_value']) / self.summary_stats['period_start_value']) * 100
+            
+            summary_data = {
+                'bot_name': self.bot_name,
+                'period': '6 hours',
+                'total_trades': self.summary_stats['total_trades'],
+                'buys': self.summary_stats['buys'],
+                'sells': self.summary_stats['sells'],
+                'total_profit': self.summary_stats['total_profit'],
+                'profit_percent': profit_percent,
+                'current_positions': positions,
+                'account_value': account_value
+            }
+            
+            self.sms_notifier.send_summary(summary_data)
+            self.logger.info(f"✅ Summary SMS sent successfully")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Error sending summary: {e}")
     
     def run(self):
         """Main trading loop"""
@@ -636,6 +704,9 @@ class BotRunner:
                 # Execute signals
                 if signal in ['BUY', 'SELL']:
                     self.execute_trade(signal, current_price, signal_data)
+                
+                # Check if 6 hours passed and send summary
+                self.check_and_send_summary()
                 
                 # Wait before next check
                 # 60 = 1 minute, 300 = 5 minutes, 900 = 15 minutes, 3600 = 1 hour

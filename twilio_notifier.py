@@ -182,6 +182,91 @@ class TwilioNotifier:
             logger.error(f"Error sending status notification: {e}")
             return False
     
+    def send_summary(self, summary_data):
+        """
+        Send 6-hour trading summary
+        
+        Args:
+            summary_data: Dict with summary info
+            {
+                'bot_name': 'AI Trader',
+                'period': '6 hours',
+                'total_trades': 5,
+                'buys': 3,
+                'sells': 2,
+                'total_profit': 12.50,
+                'profit_percent': 2.5,
+                'current_positions': ['BTC', 'ETH'],
+                'account_value': 1250.00
+            }
+        """
+        if not self.client:
+            logger.warning("Twilio not configured - skipping summary SMS")
+            return False
+        
+        try:
+            message = self._format_summary_message(summary_data)
+            
+            # Send to all recipients
+            results = []
+            for recipient in self.recipients:
+                try:
+                    sent_message = self.client.messages.create(
+                        body=message,
+                        messaging_service_sid=self.messaging_service_sid,
+                        to=recipient['number']
+                    )
+                    logger.info(f"✅ Summary SMS sent to {recipient['name']} ({recipient['number']})")
+                    results.append({'success': True, 'to': recipient['name']})
+                except Exception as e:
+                    logger.error(f"❌ Failed to send summary SMS to {recipient['name']}: {e}")
+                    results.append({'success': False, 'to': recipient['name'], 'error': str(e)})
+            
+            return results
+        
+        except Exception as e:
+            logger.error(f"Error sending summary: {e}")
+            return False
+    
+    def _format_summary_message(self, summary_data):
+        """Format trading summary into SMS message"""
+        bot_name = summary_data.get('bot_name', 'Trading Bot')
+        period = summary_data.get('period', '6 hours')
+        total_trades = summary_data.get('total_trades', 0)
+        buys = summary_data.get('buys', 0)
+        sells = summary_data.get('sells', 0)
+        total_profit = summary_data.get('total_profit', 0)
+        profit_percent = summary_data.get('profit_percent', 0)
+        positions = summary_data.get('current_positions', [])
+        account_value = summary_data.get('account_value', 0)
+        
+        # Emoji based on performance
+        if total_profit > 0:
+            profit_emoji = '📈'
+        elif total_profit < 0:
+            profit_emoji = '📉'
+        else:
+            profit_emoji = '➡️'
+        
+        message = f"🤖 {period.upper()} SUMMARY\n"
+        message += f"Bot: {bot_name}\n\n"
+        
+        message += f"📊 Trading Activity:\n"
+        message += f"  Total Trades: {total_trades}\n"
+        message += f"  • Buys: {buys}\n"
+        message += f"  • Sells: {sells}\n\n"
+        
+        message += f"{profit_emoji} Performance:\n"
+        message += f"  Profit: ${total_profit:+.2f} ({profit_percent:+.2f}%)\n\n"
+        
+        if positions:
+            message += f"💼 Open Positions:\n"
+            message += f"  {', '.join(positions)}\n\n"
+        
+        message += f"💰 Account Value: ${account_value:,.2f}"
+        
+        return message
+    
     def test_sms(self):
         """Send a test SMS to verify setup"""
         if not self.client:

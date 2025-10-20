@@ -659,6 +659,71 @@ def restart_dashboard():
             'error': str(e)
         })
 
+@app.route('/api/send_alert', methods=['POST'])
+def send_alert():
+    """Manually send trading summary SMS"""
+    try:
+        from twilio_notifier import TwilioNotifier
+        
+        # Get all bots and calculate totals
+        bots = bot_manager.get_bots()
+        running_bots = [b for b in bots if b['status'] == 'running']
+        
+        # Get account info
+        account_info = bot_manager.client.get_account_info()
+        
+        if not account_info:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to fetch account info'
+            })
+        
+        # Calculate totals
+        total_trades = sum(bot.get('trades', 0) for bot in bots)
+        total_profit = sum(bot.get('profit', 0) for bot in bots)
+        account_value = account_info.get('usdt_total', 0)
+        
+        # Get positions
+        positions = []
+        for bot in running_bots:
+            symbol = bot['symbol'].replace('USDT', '')
+            if symbol not in positions:
+                positions.append(symbol)
+        
+        # Prepare summary data
+        summary_data = {
+            'bot_name': f"Trading Dashboard ({len(running_bots)} bots)",
+            'period': 'Manual Alert',
+            'total_trades': total_trades,
+            'buys': 0,  # Not tracked at dashboard level
+            'sells': 0,  # Not tracked at dashboard level
+            'total_profit': total_profit,
+            'profit_percent': 0.0,  # Could calculate if needed
+            'current_positions': positions,
+            'account_value': account_value
+        }
+        
+        # Send SMS
+        notifier = TwilioNotifier()
+        result = notifier.send_summary(summary_data)
+        
+        if result:
+            return jsonify({
+                'success': True,
+                'message': 'Trading alert sent successfully!'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to send SMS'
+            })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
 @app.route('/api/coin/<symbol>')
 def get_coin_details(symbol):
     """Get detailed information about a specific coin"""
@@ -1546,6 +1611,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 <h2>🤖 Trading Bots</h2>
                 <div style="display: flex; gap: 10px;">
                     <button class="btn btn-sm" onclick="updateDashboard()" title="Refresh status from actual screen sessions">🔄 Refresh Status</button>
+                    <button class="btn btn-sm" onclick="sendAlert()" style="background: #667eea;" title="Send trading summary SMS now">📱 Send Alert</button>
                     <button class="btn" onclick="showAddBotModal()">➕ Add New Bot</button>
                 </div>
             </div>
@@ -2143,6 +2209,27 @@ tail -f /root/tradingbot/auto_update.log`);
                     document.getElementById('locked').textContent = 'Connection Error';
                     document.getElementById('total').textContent = 'Connection Error';
                 });
+        }
+        
+        // Send trading alert SMS
+        function sendAlert() {
+            if (confirm('Send trading summary SMS now?')) {
+                fetch('/api/send_alert', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                })
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        alert('✅ ' + result.message);
+                    } else {
+                        alert('❌ Error: ' + result.error);
+                    }
+                })
+                .catch(error => {
+                    alert('❌ Error sending alert: ' + error);
+                });
+            }
         }
         
         // Render assets
