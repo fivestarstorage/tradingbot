@@ -204,13 +204,20 @@ class BotManager:
             account = self.client.client.get_account()
             balances = account['balances']
             
-            # Get existing bots
+            # Get existing bots - ROBUST duplicate checking
             bots = self.get_bots()
-            managed_symbols = set()
+            managed_symbols = set()  # Store full symbols (e.g., BTCUSDT)
+            managed_assets = set()   # Store base assets (e.g., BTC)
+            
             for bot in bots:
                 symbol = bot['symbol']
-                coin = symbol.replace('USDT', '')
-                managed_symbols.add(coin)
+                managed_symbols.add(symbol)  # Add full symbol
+                
+                # Extract base asset (remove USDT, BUSD suffixes)
+                base_asset = symbol.replace('USDT', '').replace('BUSD', '')
+                managed_assets.add(base_asset)
+            
+            print(f"   Currently managing {len(managed_assets)} coin(s): {', '.join(sorted(managed_assets))}")
             
             # Find coins with balance > 0 that aren't managed
             orphaned_coins = []
@@ -224,12 +231,12 @@ class BotManager:
                 if asset == 'USDT' or total == 0:
                     continue
                 
-                # Skip if already managed
-                if asset in managed_symbols:
+                # ROBUST CHECK: Skip if already managed (by asset OR symbol)
+                trading_symbol = f"{asset}USDT"
+                if asset in managed_assets or trading_symbol in managed_symbols:
                     continue
                 
                 # Check if this coin can be traded on Binance
-                trading_symbol = f"{asset}USDT"
                 if self.client.is_symbol_tradeable(trading_symbol):
                     orphaned_coins.append({
                         'asset': asset,
