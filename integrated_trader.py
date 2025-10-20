@@ -626,8 +626,8 @@ class BotRunner:
         self.logger.info(f"Mode: {'TESTNET' if Config.USE_TESTNET else 'MAINNET'}")
         self.logger.info("=" * 70)
         
-        # STARTUP: Force fresh news fetch on bot start (uses 1/3 daily calls)
-        if hasattr(self.strategy, 'generate_signal'):
+        # STARTUP: Force fresh news fetch on bot start (only for news-based strategies)
+        if self.strategy_name in ['ticker_news', 'ai_autonomous']:
             self.logger.info("")
             self.logger.info("🚀 STARTUP: Fetching fresh news from CryptoNews API...")
             self.logger.info("⚠️  This will use 1 of 3 daily API calls")
@@ -643,6 +643,11 @@ class BotRunner:
                     self.logger.info(f"✅ Startup analysis complete: {startup_signal.get('signal', 'HOLD')}")
             except Exception as e:
                 self.logger.error(f"Startup fetch error: {e}")
+            self.logger.info("")
+        else:
+            # For technical strategies (like volatile), skip news fetch
+            self.logger.info("")
+            self.logger.info(f"📊 Using {self.strategy_name} strategy (pure technical analysis - no news)")
             self.logger.info("")
         
         while True:
