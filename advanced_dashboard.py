@@ -247,13 +247,13 @@ class BotManager:
                 usdt_balance = self.client.get_account_balance('USDT')
                 available_usdt = usdt_balance['free'] if usdt_balance else 0
                 
-                print(f"\n🤖 Auto-creating Ticker News Trading bots...")
-                print(f"   Each bot will: Monitor news every 15min → AI analysis → Trade decisions")
+                print(f"\n🤖 Auto-creating Volatile Coins Trading bots...")
+                print(f"   Each bot will: Technical analysis every 15min → Auto trading")
                 print(f"   Initial budget: $50 per bot (can adjust in dashboard)\n")
                 
                 for coin in orphaned_coins:
-                    # Create a bot with Ticker News Trading strategy
-                    bot_name = f"📰 {coin['asset']} News Trader"
+                    # Create a bot with Volatile Coins strategy (pure technical, no AI)
+                    bot_name = f"⚡ {coin['asset']} Volatile Trader"
                     
                     # Simple: $50 per bot to start
                     initial_amount = 50.0
@@ -261,13 +261,13 @@ class BotManager:
                     new_bot = self.add_bot(
                         name=bot_name,
                         symbol=coin['symbol'],
-                        strategy='ticker_news',
+                        strategy='volatile',
                         trade_amount=initial_amount
                     )
                     
                     print(f"   ✅ Created: {bot_name} (Bot #{new_bot['id']})")
                     print(f"      Symbol: {coin['symbol']}")
-                    print(f"      Strategy: Ticker News Trading")
+                    print(f"      Strategy: Volatile Coins (Technical Analysis)")
                     print(f"      Initial Amount: ${initial_amount:.2f}")
                     print(f"      Managing: Existing {coin['asset']} holdings")
                     
