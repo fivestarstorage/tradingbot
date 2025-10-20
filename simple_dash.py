@@ -301,6 +301,12 @@ HTML = '''<!DOCTYPE html>
             color: #333;
         }
         
+        .chart-container {
+            position: relative;
+            height: 300px;
+            width: 100%;
+        }
+        
         .bots-section {
             background: rgba(255, 255, 255, 0.95);
             border-radius: 12px;
@@ -444,7 +450,9 @@ HTML = '''<!DOCTYPE html>
         <!-- Charts -->
         <div class="chart-card">
             <div class="chart-title">📈 Performance Overview</div>
-            <canvas id="profitChart" height="80"></canvas>
+            <div class="chart-container">
+                <canvas id="profitChart"></canvas>
+            </div>
         </div>
         
         <!-- Bots Section -->
@@ -511,12 +519,24 @@ HTML = '''<!DOCTYPE html>
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: { display: false }
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return 'Profit: $' + context.parsed.y.toFixed(2);
+                                }
+                            }
+                        }
                     },
                     scales: {
                         y: {
                             beginAtZero: true,
-                            grid: { color: 'rgba(0,0,0,0.05)' }
+                            grid: { color: 'rgba(0,0,0,0.05)' },
+                            ticks: {
+                                callback: function(value) {
+                                    return '$' + value.toFixed(0);
+                                }
+                            }
                         },
                         x: {
                             grid: { display: false }
