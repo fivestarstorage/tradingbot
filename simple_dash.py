@@ -74,9 +74,10 @@ class BotManager:
             if not bot:
                 return False, 'Bot not found'
             
-            # Build command with proper escaping
+            # integrated_trader.py uses positional arguments:
+            # Usage: python integrated_trader.py <bot_id> <bot_name> <symbol> <strategy> <amount>
             bot_name = bot['name'].replace("'", "'\\''")  # Escape single quotes
-            cmd = f"screen -dmS bot_{bot_id} python3 integrated_trader.py --bot-id {bot_id} --name '{bot_name}' --symbol {bot['symbol']} --strategy {bot['strategy']} --amount {bot['trade_amount']}"
+            cmd = f"screen -dmS bot_{bot_id} python3 integrated_trader.py {bot_id} '{bot_name}' {bot['symbol']} {bot['strategy']} {bot['trade_amount']}"
             
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
             
