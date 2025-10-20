@@ -158,11 +158,14 @@ class BotManager:
             if not bot:
                 return None
             
-            # Get recent log entries
-            log_file = f'bot_{bot_id}.log'
+            # Get recent log entries (use absolute path)
+            log_file = os.path.join(os.getcwd(), f'bot_{bot_id}.log')
             recent_logs = []
             profit_history = []
             last_check_time = None
+            
+            print(f"[DEBUG] Looking for log file: {log_file}")
+            print(f"[DEBUG] File exists: {os.path.exists(log_file)}")
             
             if os.path.exists(log_file):
                 with open(log_file, 'r') as f:
@@ -211,14 +214,32 @@ class BotManager:
             # Keep last 50 profit data points
             profit_history = profit_history[-50:]
             
+            # If no logs, add helpful message
+            if not recent_logs:
+                if bot['status'] == 'running':
+                    recent_logs = [
+                        f"No logs found at: {log_file}",
+                        "Bot may be starting up...",
+                        "Check back in 30 seconds or run: tail -f " + log_file
+                    ]
+                else:
+                    recent_logs = [
+                        "Bot is stopped - no recent activity",
+                        f"Start the bot to see logs at: {log_file}"
+                    ]
+            
             return {
                 'bot': bot,
                 'recent_logs': recent_logs,
                 'position_info': position_info,
                 'profit_history': profit_history,
-                'last_check_time': last_check_time
+                'last_check_time': last_check_time,
+                'log_file_path': log_file
             }
         except Exception as e:
+            print(f"[ERROR] get_bot_details exception: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
 bot_manager = BotManager()
@@ -237,7 +258,7 @@ def overview():
         # Add last check time for each bot
         for bot in bots:
             if bot['status'] == 'running':
-                log_file = f"bot_{bot['id']}.log"
+                log_file = os.path.join(os.getcwd(), f"bot_{bot['id']}.log")
                 last_check = None
                 if os.path.exists(log_file):
                     try:
