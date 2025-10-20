@@ -487,12 +487,22 @@ class BotRunner:
             
             elif signal == 'SELL' and self.position:
                 # Get current balance
-                balance = self.client.get_account_balance(self.symbol.replace('USDT', ''))
+                asset = self.symbol.replace('USDT', '')
+                balance = self.client.get_account_balance(asset)
+                
+                self.logger.info(f"🔴 SELL ATTEMPT - {asset} Balance Check:")
+                self.logger.info(f"   Asset: {asset}")
+                self.logger.info(f"   Free: {balance.get('free', 0) if balance else 'No balance'}")
+                self.logger.info(f"   Locked: {balance.get('locked', 0) if balance else 'No balance'}")
+                self.logger.info(f"   Total: {float(balance.get('free', 0)) + float(balance.get('locked', 0)) if balance else 'No balance'}")
+                
                 if balance and balance['free'] > 0:
                     raw_quantity = balance['free']
+                    self.logger.info(f"   Raw quantity to sell: {raw_quantity}")
                     
                     # Format quantity to match Binance precision rules
                     quantity = self.format_quantity(self.symbol, raw_quantity)
+                    self.logger.info(f"   Formatted quantity: {quantity}")
                     
                     # Place order
                     order = self.client.place_market_order(
