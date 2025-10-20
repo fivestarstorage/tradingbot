@@ -337,7 +337,7 @@ class BotRunner:
                     available_usdt = 0
                 
                 # Check if we have enough USDT to buy
-                min_trade = 10  # Minimum $10 per trade
+                min_trade = 50  # Minimum $50 per trade (ensures we get enough crypto to sell later)
                 if available_usdt < min_trade:
                     self.logger.warning("=" * 70)
                     self.logger.warning(f"⚠️  Cannot BUY: Insufficient USDT")
@@ -401,8 +401,8 @@ class BotRunner:
                     self.logger.info(f"   Profit/Loss: ${available_usdt - self.initial_investment:.2f} ({((available_usdt / self.initial_investment - 1) * 100):.2f}%)")
                     self.logger.info(f"   Re-investing: ${amount_to_invest:.2f}")
                     
-                    if amount_to_invest < 10:  # Minimum $10 to trade
-                        self.logger.warning("⚠️  Balance too low to continue trading (< $10)")
+                    if amount_to_invest < 50:  # Minimum $50 to trade (ensures enough crypto to sell)
+                        self.logger.warning("⚠️  Balance too low to continue trading (< $50)")
                         self.logger.warning(f"   Available: ${available_usdt:.2f}")
                         return False
                 
@@ -503,6 +503,22 @@ class BotRunner:
                     # Format quantity to match Binance precision rules
                     quantity = self.format_quantity(self.symbol, raw_quantity)
                     self.logger.info(f"   Formatted quantity: {quantity}")
+                    
+                    # Check minimum order size (Binance requires minimum 0.001 BTC for BTCUSDT)
+                    min_quantity = 0.001
+                    if quantity < min_quantity:
+                        self.logger.warning("=" * 70)
+                        self.logger.warning("⚠️  QUANTITY TOO SMALL TO SELL")
+                        self.logger.warning("=" * 70)
+                        self.logger.warning(f"   Available: {quantity} BTC")
+                        self.logger.warning(f"   Minimum required: {min_quantity} BTC")
+                        self.logger.warning(f"   Shortfall: {min_quantity - quantity} BTC")
+                        self.logger.warning("")
+                        self.logger.warning("💡 This position is too small to sell on Binance")
+                        self.logger.warning("   The bot will keep it and wait for it to grow")
+                        self.logger.warning("   or you can manually sell it in Binance app")
+                        self.logger.warning("=" * 70)
+                        return False
                     
                     # Place order
                     order = self.client.place_market_order(
