@@ -1232,47 +1232,25 @@ HTML = '''<!DOCTYPE html>
                 if (!timerElem || !lastCheck) return;
                 
                 try {
-                    // Parse last check time 
-                    // Old format: "2025-10-24 14:30:45" or "2025-10-24 14:30:45,123"
-                    // New format: "24/10/2025 02:30 PM"
-                    let cleanTime = lastCheck.replace(',', '.').trim();
-                    let lastCheckDate;
+                    // Parse UTC timestamp from logs
+                    // Format: "2025-10-24T14:30:45Z" (ISO 8601 UTC)
+                    // JavaScript automatically converts to browser's local timezone
+                    const lastCheckDate = new Date(lastCheck);
                     
-                    // Try parsing new format first (dd/mm/yyyy hh:mm AM/PM)
-                    if (cleanTime.includes('/') && (cleanTime.includes('AM') || cleanTime.includes('PM'))) {
-                        // Parse: "24/10/2025 02:30 PM"
-                        const parts = cleanTime.split(' ');
-                        const dateParts = parts[0].split('/');
-                        const timeParts = parts[1].split(':');
-                        const ampm = parts[2];
-                        
-                        let hours = parseInt(timeParts[0]);
-                        const minutes = parseInt(timeParts[1]);
-                        
-                        // Convert to 24-hour format
-                        if (ampm === 'PM' && hours !== 12) hours += 12;
-                        if (ampm === 'AM' && hours === 12) hours = 0;
-                        
-                        // Create date: month is 0-indexed
-                        lastCheckDate = new Date(
-                            parseInt(dateParts[2]),  // year
-                            parseInt(dateParts[1]) - 1,  // month (0-indexed)
-                            parseInt(dateParts[0]),  // day
-                            hours,
-                            minutes,
-                            0
-                        );
-                    } else {
-                        // Old format fallback
-                        lastCheckDate = new Date(cleanTime);
-                    }
-                    
-                    const nextCheckDate = new Date(lastCheckDate.getTime() + (15 * 60 * 1000)); // +15 minutes
+                    // Calculate next check (15 minutes later)
+                    const nextCheckDate = new Date(lastCheckDate.getTime() + (15 * 60 * 1000));
                     const now = new Date();
                     
-                    console.log('Timer debug:', {lastCheck, cleanTime, lastCheckDate, nextCheckDate, now, diff: (nextCheckDate - now)});
-                    
                     const diff = nextCheckDate - now;
+                    
+                    // Debug: show times in local timezone
+                    console.log('Timer debug:', {
+                        lastCheckUTC: lastCheck, 
+                        lastCheckLocal: lastCheckDate.toLocaleString(),
+                        nextCheckLocal: nextCheckDate.toLocaleString(),
+                        nowLocal: now.toLocaleString(),
+                        diffMinutes: Math.floor(diff / 60000)
+                    });
                     
                     if (diff <= 0) {
                         timerElem.textContent = 'checking now...';

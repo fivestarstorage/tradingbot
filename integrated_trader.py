@@ -102,14 +102,14 @@ class BotRunner:
         # Setup logging (single log file per bot, no dates)
         log_file = f'bot_{bot_id}.log'
         
-        # Custom formatter with timezone conversion
+        # Custom formatter with UTC timestamps
         class TimezoneFormatter(logging.Formatter):
             def formatTime(self, record, datefmt=None):
-                # Use local system timezone (automatically handles AEDT/AEST)
+                # Log in UTC - frontend will convert to local time
                 import datetime
-                local_time = datetime.datetime.fromtimestamp(record.created)
-                # Format: 24/10/2025 06:28 PM
-                return local_time.strftime('%d/%m/%Y %I:%M %p')
+                utc_time = datetime.datetime.utcfromtimestamp(record.created)
+                # Format: ISO 8601 with Z suffix for UTC
+                return utc_time.strftime('%Y-%m-%dT%H:%M:%SZ')
         
         formatter = TimezoneFormatter('%(asctime)s - %(levelname)s - %(message)s')
         
