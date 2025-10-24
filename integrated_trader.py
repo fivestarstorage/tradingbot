@@ -105,11 +105,9 @@ class BotRunner:
         # Custom formatter with timezone conversion
         class TimezoneFormatter(logging.Formatter):
             def formatTime(self, record, datefmt=None):
-                # Convert UTC to local timezone (adjust as needed)
+                # Use local system timezone (automatically handles AEDT/AEST)
                 import datetime
-                utc_time = datetime.datetime.utcfromtimestamp(record.created)
-                # Add your timezone offset here (e.g., +10 for Sydney, +8 for Singapore)
-                local_time = utc_time + datetime.timedelta(hours=10)  # Sydney time
+                local_time = datetime.datetime.fromtimestamp(record.created)
                 return local_time.strftime('%Y-%m-%d %H:%M:%S')
         
         formatter = TimezoneFormatter('%(asctime)s - %(levelname)s - %(message)s')
