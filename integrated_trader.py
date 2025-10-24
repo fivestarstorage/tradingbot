@@ -352,7 +352,7 @@ class BotRunner:
                     available_usdt = 0
                 
                 # Check if we have enough USDT to buy
-                min_trade = 50  # Minimum $50 per trade (ensures we get enough crypto to sell later)
+                min_trade = 100  # Minimum $100 per trade (ensures we get enough crypto to sell later)
                 if available_usdt < min_trade:
                     self.logger.warning("=" * 70)
                     self.logger.warning(f"⚠️  Cannot BUY: Insufficient USDT")
@@ -416,8 +416,8 @@ class BotRunner:
                     self.logger.info(f"   Profit/Loss: ${available_usdt - self.initial_investment:.2f} ({((available_usdt / self.initial_investment - 1) * 100):.2f}%)")
                     self.logger.info(f"   Re-investing: ${amount_to_invest:.2f}")
                     
-                    if amount_to_invest < 50:  # Minimum $50 to trade (ensures enough crypto to sell)
-                        self.logger.warning("⚠️  Balance too low to continue trading (< $50)")
+                    if amount_to_invest < 100:  # Minimum $100 to trade (ensures enough crypto to sell)
+                        self.logger.warning("⚠️  Balance too low to continue trading (< $100)")
                         self.logger.warning(f"   Available: ${available_usdt:.2f}")
                         return False
                 
@@ -519,15 +519,15 @@ class BotRunner:
                     quantity = self.format_quantity(self.symbol, raw_quantity)
                     self.logger.info(f"   Formatted quantity: {quantity}")
                     
-                    # Check minimum order size (Binance requires minimum 0.001 BTC for BTCUSDT)
-                    min_quantity = 0.001
+                    # Check minimum order size based on symbol
+                    min_quantity = self._get_minimum_order_size(self.symbol)
                     if quantity < min_quantity:
                         self.logger.warning("=" * 70)
                         self.logger.warning("⚠️  QUANTITY TOO SMALL TO SELL")
                         self.logger.warning("=" * 70)
-                        self.logger.warning(f"   Available: {quantity} BTC")
-                        self.logger.warning(f"   Minimum required: {min_quantity} BTC")
-                        self.logger.warning(f"   Shortfall: {min_quantity - quantity} BTC")
+                        self.logger.warning(f"   Available: {quantity} {asset}")
+                        self.logger.warning(f"   Minimum required: {min_quantity} {asset}")
+                        self.logger.warning(f"   Shortfall: {min_quantity - quantity} {asset}")
                         self.logger.warning("")
                         self.logger.warning("💡 This position is too small to sell on Binance")
                         self.logger.warning("   The bot will keep it and wait for it to grow")
@@ -594,6 +594,30 @@ class BotRunner:
             self.logger.error(f"Error executing trade: {e}")
         
         return False
+    
+    def _get_minimum_order_size(self, symbol):
+        """Get minimum order size for different symbols"""
+        # Common minimum order sizes for popular pairs
+        min_sizes = {
+            'BTCUSDT': 0.001,      # 0.001 BTC
+            'ETHUSDT': 0.01,       # 0.01 ETH  
+            'BNBUSDT': 0.1,        # 0.1 BNB
+            'ADAUSDT': 10.0,       # 10 ADA
+            'SOLUSDT': 0.1,        # 0.1 SOL
+            'DOGEUSDT': 100.0,     # 100 DOGE
+            'XRPUSDT': 10.0,       # 10 XRP
+            'DOTUSDT': 1.0,        # 1 DOT
+            'LINKUSDT': 1.0,       # 1 LINK
+            'LTCUSDT': 0.1,        # 0.1 LTC
+            'AVAXUSDT': 0.1,       # 0.1 AVAX
+            'MATICUSDT': 10.0,     # 10 MATIC
+            'ATOMUSDT': 1.0,       # 1 ATOM
+            'UNIUSDT': 1.0,        # 1 UNI
+            'AAVEUSDT': 0.1,       # 0.1 AAVE
+        }
+        
+        # Return specific minimum or default
+        return min_sizes.get(symbol, 0.01)  # Default 0.01 for unknown pairs
     
     def check_and_send_summary(self):
         """Check if 6 hours have passed and send summary SMS"""
