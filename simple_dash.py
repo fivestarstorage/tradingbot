@@ -244,6 +244,41 @@ class BotManager:
             import traceback
             traceback.print_exc()
             return None
+    
+    def create_bot(self, name, symbol, strategy, trade_amount):
+        """Create a new bot"""
+        try:
+            bots = self.get_bots()
+            
+            # Generate new bot ID
+            if not bots:
+                new_id = 1
+            else:
+                new_id = max(bot['id'] for bot in bots) + 1
+            
+            # Create new bot
+            new_bot = {
+                'id': new_id,
+                'name': name,
+                'symbol': symbol,
+                'strategy': strategy,
+                'trade_amount': trade_amount,
+                'status': 'stopped',
+                'profit': 0.0,
+                'trades': 0
+            }
+            
+            # Add to bots list
+            bots.append(new_bot)
+            
+            # Save to file
+            with open(self.bots_file, 'w') as f:
+                json.dump(bots, f, indent=2)
+            
+            return True, f'Bot {name} created successfully'
+            
+        except Exception as e:
+            return False, f'Error creating bot: {str(e)}'
 
 bot_manager = BotManager()
 
@@ -1408,8 +1443,12 @@ HTML = '''<!DOCTYPE html>
                     updateDashboard();
                     alert('Bot created successfully!');
                 } else {
-                    alert('Error: ' + data.message);
+                    alert('Error: ' + (data.message || data.error || 'Unknown error'));
                 }
+            })
+            .catch(error => {
+                console.error('Create bot error:', error);
+                alert('Network error: ' + error.message);
             });
         }
         
