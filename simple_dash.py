@@ -304,19 +304,28 @@ def overview():
                     try:
                         with open(log_file, 'r') as f:
                             lines = f.readlines()
-                            # Look for recent signal generation or any recent activity
-                            for line in reversed(lines[-50:]):  # Check last 50 lines
-                                if any(keyword in line for keyword in ['Signal:', 'Generating signal', 'BUY Signal', 'SELL Signal', 'Analyzing', 'Checking']):
+                            # Look for ANY recent activity (broader search)
+                            for line in reversed(lines[-100:]):  # Check last 100 lines
+                                # Look for timestamp pattern first
+                                if len(line.strip()) > 20:  # Ensure line has content
                                     parts = line.split()
                                     if len(parts) >= 2:
-                                        # Extract timestamp from log line
-                                        timestamp = f"{parts[0]} {parts[1]}"
-                                        # Validate it looks like a timestamp
-                                        if len(parts[0]) == 10 and len(parts[1]) >= 8:  # YYYY-MM-DD HH:MM:SS
+                                        # Check if first two parts look like a timestamp
+                                        if (len(parts[0]) == 10 and parts[0].count('-') == 2 and 
+                                            len(parts[1]) >= 8 and ':' in parts[1]):
+                                            # Found a valid timestamp - use it as last check
+                                            timestamp = f"{parts[0]} {parts[1]}"
                                             last_check = timestamp
                                             break
-                    except:
+                    except Exception as e:
+                        print(f"[DEBUG] Error reading log file {log_file}: {e}")
                         pass
+                # If no timestamp found in logs, use current time as fallback
+                if not last_check and bot['status'] == 'running':
+                    from datetime import datetime
+                    last_check = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    print(f"[DEBUG] No log timestamp found for bot {bot['id']}, using current time: {last_check}")
+                
                 bot['last_check'] = last_check
             else:
                 bot['last_check'] = None

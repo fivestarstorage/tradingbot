@@ -596,28 +596,27 @@ class BotRunner:
         return False
     
     def _get_minimum_order_size(self, symbol):
-        """Get minimum order size for different symbols"""
-        # Common minimum order sizes for popular pairs
-        min_sizes = {
-            'BTCUSDT': 0.001,      # 0.001 BTC
-            'ETHUSDT': 0.01,       # 0.01 ETH  
-            'BNBUSDT': 0.1,        # 0.1 BNB
-            'ADAUSDT': 10.0,       # 10 ADA
-            'SOLUSDT': 0.1,        # 0.1 SOL
-            'DOGEUSDT': 100.0,     # 100 DOGE
-            'XRPUSDT': 10.0,       # 10 XRP
-            'DOTUSDT': 1.0,        # 1 DOT
-            'LINKUSDT': 1.0,       # 1 LINK
-            'LTCUSDT': 0.1,        # 0.1 LTC
-            'AVAXUSDT': 0.1,       # 0.1 AVAX
-            'MATICUSDT': 10.0,     # 10 MATIC
-            'ATOMUSDT': 1.0,       # 1 ATOM
-            'UNIUSDT': 1.0,        # 1 UNI
-            'AAVEUSDT': 0.1,       # 0.1 AAVE
-        }
-        
-        # Return specific minimum or default
-        return min_sizes.get(symbol, 0.01)  # Default 0.01 for unknown pairs
+        """Get minimum order size dynamically from Binance API"""
+        try:
+            # Get exchange info for the symbol
+            exchange_info = self.client.client.get_exchange_info()
+            
+            for symbol_info in exchange_info['symbols']:
+                if symbol_info['symbol'] == symbol:
+                    # Get the minimum quantity from the symbol's filters
+                    for filter_info in symbol_info['filters']:
+                        if filter_info['filterType'] == 'LOT_SIZE':
+                            min_qty = float(filter_info['minQty'])
+                            self.logger.info(f"📊 Dynamic minimum order size for {symbol}: {min_qty}")
+                            return min_qty
+            
+            # Fallback to default if not found
+            self.logger.warning(f"⚠️  Could not get minimum order size for {symbol}, using default 0.01")
+            return 0.01
+            
+        except Exception as e:
+            self.logger.error(f"Error getting minimum order size: {e}")
+            return 0.01  # Safe fallback
     
     def check_and_send_summary(self):
         """Check if 6 hours have passed and send summary SMS"""
