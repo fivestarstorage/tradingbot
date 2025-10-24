@@ -318,7 +318,22 @@ class BotRunner:
             if balance:
                 amount = float(balance.get('free', 0))
                 if amount > 0:
-                    # We have coins but no tracked position!
+                    # Check if position is large enough to trade
+                    data = self.get_data(limit=10)
+                    if data and len(data) > 0:
+                        current_price = float(data[-1][4])
+                        position_value = amount * current_price
+                        
+                        # Only track if position is worth at least $10
+                        if position_value < 10.0:
+                            self.logger.warning("=" * 70)
+                            self.logger.warning(f"ℹ️  Found {amount:.6f} {coin} in wallet (${position_value:.2f})")
+                            self.logger.warning(f"   Position too small to trade (minimum $10)")
+                            self.logger.warning(f"   Bot will ignore this and start fresh")
+                            self.logger.warning("=" * 70)
+                            return
+                    
+                    # We have tradeable coins but no tracked position!
                     self.logger.warning("=" * 70)
                     self.logger.warning(f"⚠️  ORPHANED POSITION DETECTED")
                     self.logger.warning("=" * 70)
@@ -619,6 +634,23 @@ class BotRunner:
                         self.logger.warning("💡 This position is too small to sell on Binance")
                         self.logger.warning("   The bot will keep it and wait for it to grow")
                         self.logger.warning("   or you can manually sell it in Binance app")
+                        self.logger.warning("=" * 70)
+                        return False
+                    
+                    # Check minimum notional value (minimum dollar amount)
+                    order_value = quantity * current_price
+                    min_notional = 10.0  # Binance minimum is usually $10-20
+                    if order_value < min_notional:
+                        self.logger.warning("=" * 70)
+                        self.logger.warning("⚠️  ORDER VALUE TOO SMALL")
+                        self.logger.warning("=" * 70)
+                        self.logger.warning(f"   Order Value: ${order_value:.2f}")
+                        self.logger.warning(f"   Minimum Required: ${min_notional}")
+                        self.logger.warning(f"   Quantity: {quantity} {asset}")
+                        self.logger.warning("")
+                        self.logger.warning("💡 Position value is below Binance minimum ($10)")
+                        self.logger.warning("   Bot will hold until position grows larger")
+                        self.logger.warning("   Or buy more to reach minimum trade size")
                         self.logger.warning("=" * 70)
                         return False
                     
