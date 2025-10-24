@@ -116,52 +116,70 @@ class BotManager:
             return None
     
     def start_bot(self, bot_id):
-        """Start a bot"""
+        """Start a bot - CLEAN startup logic"""
         try:
             bots = self.get_bots()
             bot = next((b for b in bots if b['id'] == bot_id), None)
             if not bot:
                 return False, 'Bot not found'
             
-            # integrated_trader.py uses positional arguments:
-            # Usage: python integrated_trader.py <bot_id> <bot_name> <symbol> <strategy> <amount>
+            # CRITICAL: If bot has never traded (0 trades), delete old position file
+            # This prevents old positions from being loaded into new bots
+            if bot.get('trades', 0) == 0:
+                position_file = f'bot_{bot_id}_position.json'
+                if os.path.exists(position_file):
+                    print(f"[CLEANUP] Deleting old position file for new bot {bot_id}")
+                    os.remove(position_file)
+                
+                # Also clear old log file for fresh start
+                log_file = f'bot_{bot_id}.log'
+                if os.path.exists(log_file):
+                    print(f"[CLEANUP] Clearing old log for new bot {bot_id}")
+                    os.remove(log_file)
+            
+            # Build command to start bot
             bot_name = bot['name'].replace("'", "'\\''")  # Escape single quotes
             cmd = f"cd {os.getcwd()} && screen -dmS bot_{bot_id} python3 integrated_trader.py {bot_id} '{bot_name}' {bot['symbol']} {bot['strategy']} {bot['trade_amount']}"
             
-            print(f"[DEBUG] Starting bot {bot_id} with command: {cmd}")
+            print(f"[DEBUG] Starting bot {bot_id}: {bot['symbol']} with ${bot['trade_amount']}")
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, cwd=os.getcwd())
             
             if result.returncode != 0:
                 print(f"[ERROR] Command failed: {result.stderr}")
                 return False, f'Command failed: {result.stderr}'
             
-            # Give the screen session a moment to start
-            time.sleep(1.0)
+            # Give it time to start
+            time.sleep(2.0)
             
-            # Verify it actually started
+            # Verify screen session exists
             check = subprocess.run(['screen', '-list'], capture_output=True, text=True)
-            print(f"[DEBUG] Screen sessions: {check.stdout}")
             
             if f'bot_{bot_id}' not in check.stdout:
-                # Check if bot is actually running (might have crashed)
+                # Bot failed to start - check why
                 log_file = os.path.join(os.getcwd(), f'bot_{bot_id}.log')
-                error_msg = 'Failed to start. '
+                error_msg = 'Bot failed to start (screen session not found)'
+                
                 if os.path.exists(log_file):
                     try:
                         with open(log_file, 'r') as f:
-                            last_lines = f.readlines()[-5:]
-                            if last_lines:
-                                error_msg += f"Last log: {last_lines[-1].strip()}"
+                            lines = f.readlines()
+                            if lines:
+                                # Get last few lines for error context
+                                last_lines = lines[-10:]
+                                error_msg = 'Bot crashed on startup. Last logs:\n' + ''.join(last_lines[-3:])
                     except:
                         pass
+                
                 return False, error_msg
             
+            # Success!
             bot['status'] = 'running'
             with open(self.bots_file, 'w') as f:
                 json.dump(bots, f, indent=2)
             
             print(f"[SUCCESS] Bot {bot_id} started successfully")
             return True, 'Bot started successfully'
+            
         except Exception as e:
             print(f"[ERROR] Exception starting bot: {e}")
             import traceback

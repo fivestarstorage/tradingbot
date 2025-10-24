@@ -181,41 +181,79 @@ class BotRunner:
         self._check_orphaned_positions()
     
     def _load_position(self):
-        """Load saved position from file (if exists)"""
+        """Load saved position from file (if exists and is valid)"""
         try:
             import json
-            if os.path.exists(self.position_file):
-                with open(self.position_file, 'r') as f:
-                    data = json.load(f)
-                    self.position = data.get('position')
-                    self.entry_price = data.get('entry_price')
-                    self.stop_loss = data.get('stop_loss')
-                    self.take_profit = data.get('take_profit')
-                    self.symbol = data.get('symbol', self.symbol)
-                    self.has_traded = data.get('has_traded', False)
-                    self.initial_investment = data.get('initial_investment', 0.0)
-                    capital_additions = data.get('capital_additions', [])
+            if not os.path.exists(self.position_file):
+                self.logger.info("ℹ️  No saved position found - starting fresh")
+                return
+            
+            # Check if position file is recent (within last 7 days)
+            import time
+            file_age_days = (time.time() - os.path.getmtime(self.position_file)) / 86400
+            if file_age_days > 7:
+                self.logger.warning(f"⚠️  Position file is {file_age_days:.1f} days old - ignoring")
+                os.remove(self.position_file)
+                return
+            
+            with open(self.position_file, 'r') as f:
+                data = json.load(f)
+                
+                # Validate position data
+                if not data.get('position') or not data.get('entry_price'):
+                    self.logger.warning("⚠️  Invalid position data - ignoring")
+                    os.remove(self.position_file)
+                    return
+                
+                # Check if we actually have the coin in wallet
+                asset = self.symbol.replace('USDT', '')
+                try:
+                    balance = self.client.get_account_balance(asset)
+                    if not balance or balance['total'] == 0:
+                        self.logger.warning(f"⚠️  No {asset} in wallet but position file exists - cleaning up")
+                        os.remove(self.position_file)
+                        return
+                except:
+                    pass
+                
+                # Load the position
+                self.position = data.get('position')
+                self.entry_price = data.get('entry_price')
+                self.stop_loss = data.get('stop_loss')
+                self.take_profit = data.get('take_profit')
+                self.symbol = data.get('symbol', self.symbol)
+                self.has_traded = data.get('has_traded', False)
+                self.initial_investment = data.get('initial_investment', 0.0)
+                capital_additions = data.get('capital_additions', [])
+                
+                self.logger.info("=" * 70)
+                self.logger.info(f"📂 LOADED EXISTING POSITION FROM FILE")
+                self.logger.info(f"   Symbol: {self.symbol}")
+                self.logger.info(f"   Entry: ${self.entry_price:.2f}")
+                self.logger.info(f"   Stop Loss: ${self.stop_loss:.2f}")
+                self.logger.info(f"   Take Profit: ${self.take_profit:.2f}")
+                if self.has_traded:
+                    self.logger.info(f"   Total Investment: ${self.initial_investment:.2f}")
+                    if capital_additions:
+                        self.logger.info(f"   Capital Additions: {len(capital_additions)} time(s)")
+                        for addition in capital_additions[-3:]:  # Show last 3
+                            self.logger.info(f"      + ${addition['amount']:.2f} on {addition['timestamp'][:10]}")
+                self.logger.info("=" * 70)
+                
+                # CRITICAL: Tell the strategy about the loaded position!
+                if self.position == 'LONG' and hasattr(self.strategy, 'set_position'):
+                    self.strategy.set_position(self.symbol, self.entry_price)
+                    self.logger.info("✅ Informed strategy about existing position")
                     
-                    self.logger.info("=" * 70)
-                    self.logger.info(f"📂 LOADED EXISTING POSITION FROM FILE")
-                    self.logger.info(f"   Symbol: {self.symbol}")
-                    self.logger.info(f"   Entry: ${self.entry_price:.2f}")
-                    self.logger.info(f"   Stop Loss: ${self.stop_loss:.2f}")
-                    self.logger.info(f"   Take Profit: ${self.take_profit:.2f}")
-                    if self.has_traded:
-                        self.logger.info(f"   Total Investment: ${self.initial_investment:.2f}")
-                        if capital_additions:
-                            self.logger.info(f"   Capital Additions: {len(capital_additions)} time(s)")
-                            for addition in capital_additions[-3:]:  # Show last 3
-                                self.logger.info(f"      + ${addition['amount']:.2f} on {addition['timestamp'][:10]}")
-                    self.logger.info("=" * 70)
-                    
-                    # CRITICAL: Tell the strategy about the loaded position!
-                    if self.position == 'long' and hasattr(self.strategy, 'set_position'):
-                        self.strategy.set_position(self.symbol, self.entry_price)
-                        self.logger.info("✅ Informed strategy about existing position")
         except Exception as e:
             self.logger.error(f"Error loading position: {e}")
+            # Delete corrupted position file
+            if os.path.exists(self.position_file):
+                try:
+                    os.remove(self.position_file)
+                    self.logger.info("🗑️  Deleted corrupted position file")
+                except:
+                    pass
     
     def _save_position(self):
         """Save current position to file"""
