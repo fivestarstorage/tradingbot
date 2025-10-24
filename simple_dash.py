@@ -1233,10 +1233,15 @@ HTML = '''<!DOCTYPE html>
                 
                 try {
                     // Parse last check time (format: "2025-10-20 14:30:45" or "2025-10-20 14:30:45,123")
-                    let cleanTime = lastCheck.replace(',', '.');
+                    let cleanTime = lastCheck.replace(',', '.').trim();
+                    
+                    // Force parse as local time (assumes browser and server are in same timezone)
+                    // If you see wrong countdowns, check server timezone vs browser timezone
                     const lastCheckDate = new Date(cleanTime);
                     const nextCheckDate = new Date(lastCheckDate.getTime() + (15 * 60 * 1000)); // +15 minutes
                     const now = new Date();
+                    
+                    console.log('Timer debug:', {lastCheck, cleanTime, lastCheckDate, nextCheckDate, now, diff: (nextCheckDate - now)});
                     
                     const diff = nextCheckDate - now;
                     
