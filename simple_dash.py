@@ -1,20 +1,64 @@
 """
-Simple Trading Dashboard - Clean & Modern with Charts
+Simple Trading Dashboard - Web Interface for Bot Management
+============================================================
+
+This is your control center for managing trading bots!
+
+What it does:
+- Start and stop trading bots
+- View real-time profits and stats
+- Monitor bot activity and logs
+- Search and add new coins to trade
+- Send SMS alerts
+
+How to use:
+1. Run: python3 simple_dash.py
+2. Open browser: http://localhost:5001
+3. Click "Add Coin" to create a new bot
+4. Start the bot and watch it trade!
+
+Features:
+- Beautiful web interface
+- Real-time updates every 30 seconds
+- Countdown timers showing when bots will check next
+- Profit charts for each bot
+- Search trending coins on Binance
+
+Author: Trading Bot
 """
+
 from flask import Flask, jsonify, request
 import json
 import os
 import subprocess
 import time
 from datetime import datetime, timedelta
+
+# Import our core modules from the core/ folder
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'core'))
 from binance_client import BinanceClient
 from config import Config
 
 app = Flask(__name__)
 
 class BotManager:
+    """
+    Manages all trading bots
+    
+    This class handles:
+    - Creating new bots
+    - Starting/stopping bots
+    - Tracking bot performance
+    - Reading bot logs
+    - Updating bot settings
+    """
+    
     def __init__(self):
+        """Initialize the bot manager and connect to Binance"""
         self.bots_file = 'active_bots.json'
+        
+        # Connect to Binance API
         self.client = BinanceClient(
             api_key=Config.BINANCE_API_KEY,
             api_secret=Config.BINANCE_API_SECRET,

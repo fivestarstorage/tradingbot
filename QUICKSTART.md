@@ -1,191 +1,280 @@
-# ⚡ Quick Start Guide - 5 Minutes to First Test
+# ⚡ Quick Start Guide
 
-## Step 1: Install (30 seconds)
+Get your trading bot running in 5 minutes!
+
+---
+
+## Step 1: Install Dependencies (1 minute)
 
 ```bash
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 ```
 
-## Step 2: Configure (1 minute)
+If you get errors:
+- Make sure Python 3.8+ is installed
+- Try: `python3 -m pip install -r requirements.txt`
+- On Mac: May need `brew install python3`
+
+---
+
+## Step 2: Configure Settings (2 minutes)
+
+### Create .env file
 
 ```bash
 cp env_template.txt .env
 ```
 
-Edit `.env` and add your Binance API keys:
-```
-BINANCE_API_KEY=your_key_here
-BINANCE_API_SECRET=your_secret_here
-USE_TESTNET=false  # false = more data, true = safe testnet
-```
+### Get Binance API Keys
 
-**Get API keys:** https://www.binance.com/en/my/settings/api-management
+1. Go to: https://www.binance.com/en/my/settings/api-management
+2. Click "Create API"
+3. Give it a name like "TradingBot"
+4. Click "Create"
+5. Copy the **API Key** and **Secret Key**
 
-## Step 3: Run Your First Test (30 seconds)
+### Edit .env file
 
-```bash
-python3 quick_backtest.py
-```
-
-**Enter:**
-- Strategy: `1` (Simple Profitable ⭐)
-- Coin: `1` (Bitcoin)
-- Timeframe: `3` (1h, 90 days)
-
-**Wait ~30 seconds for results!**
-
----
-
-## Understanding Your Results
-
-```
-BACKTEST RESULTS: Simple Profitable ⭐ on BTCUSDT
-================================================================
-Initial Capital:      $1000.00
-Final Equity:         $1150.00
-Total Return:         +15.00%         ← Profit!
-
-Total Trades:         18               ← Number of trades
-Winning Trades:       11 (61.1%)      ← Win rate
-Profit Factor:        2.1              ← Risk/reward
-
-✅ GOOD - Profitable strategy
-```
-
-**What's good?**
-- ✅ Return > +5%
-- ✅ Win rate > 50%
-- ✅ Profit factor > 1.5
-
----
-
-## What to Test Next
-
-### Test Different Coins
+Open `.env` in any text editor and add your keys:
 
 ```bash
-python3 quick_backtest.py
+# REQUIRED: Your Binance credentials
+BINANCE_API_KEY=paste_your_api_key_here
+BINANCE_API_SECRET=paste_your_secret_key_here
+
+# IMPORTANT: Start with testnet (fake money!)
+USE_TESTNET=true
+
+# Optional: Change these if you want
+TRADING_SYMBOL=BTCUSDT
+TRADE_AMOUNT=100
 ```
 
-Try:
-- Coin 2: Ethereum
-- Coin 4: Solana
-- Coin 5: Dogecoin
+**Save the file!**
 
-### Test Different Strategies
+---
+
+## Step 3: Start Dashboard (30 seconds)
+
+### Easy way:
 
 ```bash
-python3 quick_backtest.py
+chmod +x start.sh
+./start.sh
 ```
 
-Try:
-- Strategy 4: Mean Reversion (good for volatile coins)
-- Strategy 2: Enhanced Momentum (good for BTC/ETH)
-
-### Find the Best Combination
+### Manual way:
 
 ```bash
-python3 test_all_combinations.py
+python3 simple_dash.py
 ```
 
-Choose mode 3, enter your favorite coin.
-**It tests all 6 strategies and shows you which works best!**
+You should see:
+```
+🤖 Starting Trading Bot Dashboard
+🚀 Starting dashboard on http://localhost:5001
+```
 
 ---
 
-## 6 Available Strategies
+## Step 4: Open Browser (10 seconds)
 
-| # | Name | Best For | Trades |
-|---|------|----------|--------|
-| **1** | **Simple Profitable ⭐** | **All coins** | 10-20 |
-| 2 | Enhanced Momentum | BTC, ETH | 20-40 |
-| 3 | Volatile Coins | SOL, DOGE | 10-25 |
-| 4 | Mean Reversion | Ranging markets | 15-30 |
-| 5 | Breakout | Strong trends | 10-20 |
-| 6 | Conservative | Risk-averse | 5-15 |
+Go to: **http://localhost:5001**
 
-**Start with #1 (Simple Profitable) - it works on everything!**
+You should see your dashboard! 🎉
 
 ---
 
-## 10 Available Coins
+## Step 5: Create Your First Bot (2 minutes)
 
-### Large Cap (Stable)
-1. Bitcoin (BTCUSDT)
-2. Ethereum (ETHUSDT)
-3. Binance Coin (BNBUSDT)
-8. Cardano (ADAUSDT)
-9. Ripple (XRPUSDT)
+### In the Dashboard:
 
-### High Volatility
-4. Solana (SOLUSDT)
-5. Dogecoin (DOGEUSDT)
-6. Avalanche (AVAXUSDT)
-7. Polygon (MATICUSDT)
-10. Polkadot (DOTUSDT)
+1. **Click "➕ Add Coin" button**
 
----
+2. **Choose a coin:**
+   - Click "Load Trending Coins"
+   - Pick Bitcoin (BTCUSDT) or Ethereum (ETHUSDT)
+   - Or type manually: `BTCUSDT`
 
-## 4 Timeframes
+3. **Select strategy:**
+   - **Volatile Coins** - Good default choice
+   - **Ticker News** - Needs OpenAI API key
 
-| Option | Interval | Days | Candles | Best For |
-|--------|----------|------|---------|----------|
-| 1 | 5m | 30 | ~8,640 | Day trading |
-| 2 | 15m | 60 | ~5,760 | Intraday |
-| **3** | **1h** | **90** | **~2,160** | **Swing trading ⭐** |
-| 4 | 4h | 180 | ~1,080 | Position trading |
+4. **Set trade amount:**
+   - $50 minimum (for testnet, any amount works)
+   - Start small: $50-100
 
-**Recommendation: Use option 3 (1h) for best results**
+5. **Click "Create Bot"**
+
+Your bot appears in the dashboard! ✅
 
 ---
 
-## Common Issues
+## Step 6: Start Trading! (10 seconds)
 
-**"0 trades" or "Strategy too selective"**
-→ Use 1h timeframe (option 3) instead of 5m or 15m
+1. Find your bot in the list
+2. Click **"Start"** button
+3. Bot begins analyzing every 15 minutes
 
-**"Failed to fetch data"**
-→ Set `USE_TESTNET=false` in `.env` (testnet has limited data)
-
-**"Invalid symbol"**
-→ Use full pair name: `BTCUSDT` not `BTC`
+Watch the countdown timer to see when it checks next!
 
 ---
 
-## Pro Tips
+## Step 7: Monitor Your Bot
 
-✅ **Start with 1h timeframe** - Best balance of data and quality
-✅ **Test on multiple coins** - What works for BTC might not work for DOGE
-✅ **Look for consistency** - Good if profitable across multiple timeframes
-✅ **Use test_all_combinations.py** - Let it find the best strategy for you
+### In the Dashboard:
+
+- **Overview cards** show total balance, profit, bots running
+- **Bot cards** show individual bot stats
+- **Click "View"** to see:
+  - Live logs
+  - Profit chart
+  - Position details
+
+### Check Logs Manually:
+
+```bash
+# View bot log
+cat bot_1.log
+
+# Watch live updates
+tail -f bot_1.log
+```
+
+---
+
+## Common Questions
+
+### "API key not found"
+- Make sure you saved the `.env` file
+- Check there are no extra spaces around the `=` sign
+- API key should be inside the quotes
+
+### "Bot won't start"
+- Check if `screen` is installed: `screen --version`
+- View logs: `cat bot_1.log`
+- Make sure Binance keys are correct
+
+### "No trades happening"
+- **This is normal!** Bots wait for good setups
+- Check logs to see signals: `cat bot_1.log`
+- May take hours before first trade
+- Bot checks every 15 minutes
+
+### "How do I stop?"
+- Click "Stop" button in dashboard
+- Or run: `./stop-all-bots.sh`
+- Or: `screen -S bot_1 -X quit`
 
 ---
 
 ## Next Steps
 
-1. ✅ Test Simple Profitable on BTC (5 minutes)
-2. ✅ Test on 2-3 different coins (10 minutes)
-3. ✅ Run `test_all_combinations.py` mode 2 or 3 (5-10 minutes)
-4. ✅ Find your best combination!
-5. ✅ Test on Binance Testnet before live trading
+### Test on Testnet First!
+- Keep `USE_TESTNET=true` in .env
+- Test for at least 1 week
+- Learn how everything works
+- No risk since it's fake money!
+
+### When Ready for Real Trading:
+1. Change `.env`: `USE_TESTNET=false`
+2. Restart dashboard
+3. Create new bots
+4. **Start with small amounts!** ($50-100)
+
+### Monitor Daily:
+- Check dashboard once per day
+- Review bot logs weekly
+- Stop bots if losing consistently
 
 ---
 
-## Quick Commands
+## Stop Everything
 
+### Stop a Single Bot:
+- Use "Stop" button in dashboard
+
+### Stop All Bots:
 ```bash
-# Test single strategy
-python3 quick_backtest.py
+./stop-all-bots.sh
+```
 
-# Find best for specific coin
-python3 test_all_combinations.py  # Mode 3
+### Stop Dashboard:
+- Press `Ctrl+C` in terminal
 
-# Test everything (10 min)
-python3 test_all_combinations.py  # Mode 1
+---
+
+## Troubleshooting
+
+### "Port already in use"
+Someone else is using port 5001. Edit `simple_dash.py`:
+```python
+# Change last line:
+app.run(host='0.0.0.0', port=5002, debug=False)  # Use 5002 instead
+```
+
+### "Module not found"
+Install dependencies again:
+```bash
+pip3 install -r requirements.txt
+```
+
+### "Screen not found"
+Install screen:
+```bash
+# Mac
+brew install screen
+
+# Ubuntu/Debian
+sudo apt-get install screen
+
+# CentOS/RHEL
+sudo yum install screen
 ```
 
 ---
 
-**That's it! Start testing and find your winning combination! 🚀**
+## Important Safety Reminders
 
-For detailed docs, see `README.md`
+### Always Start with Testnet
+- Use fake money first
+- Test for 1-2 weeks
+- Learn how it works
+- NO RISK!
+
+### Start Small
+- $50-100 per bot initially
+- Increase only after success
+- Never risk more than you can lose
+
+### Monitor Regularly
+- Check dashboard daily
+- Review logs weekly
+- Stop if losing consistently
+
+### Keep API Keys Safe
+- Never share your keys
+- Don't commit .env to Git
+- Use Binance API restrictions
+
+---
+
+## What's Next?
+
+### Learn More:
+- **[README.md](README.md)** - Complete documentation
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** - How it all works
+- **[docs/STRATEGIES.md](docs/STRATEGIES.md)** - Strategy details
+
+### Advanced Features:
+- Run multiple bots simultaneously
+- Try different strategies
+- Enable SMS notifications
+- Backtest strategies on historical data
+
+---
+
+**You're all set! Happy trading! 🚀💰**
+
+Remember: Start with testnet, start small, stay safe!
+

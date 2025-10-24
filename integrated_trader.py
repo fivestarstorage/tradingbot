@@ -1,7 +1,41 @@
 """
-Integrated Live Trader - Called by Dashboard
-Runs a single bot with specified parameters
+Integrated Trading Bot - The Heart of Automated Trading
+========================================================
+
+This is the actual bot that does the trading!
+
+What it does:
+- Analyzes market data every 15 minutes
+- Uses your chosen strategy to make buy/sell decisions
+- Executes trades automatically on Binance
+- Tracks profits and losses
+- Saves all activity to a log file
+- Handles position management and risk
+
+How it works:
+1. Dashboard starts this script in the background
+2. Bot loads your chosen strategy (e.g., 'volatile', 'ticker_news')
+3. Every 15 minutes:
+   - Fetches latest price data from Binance
+   - Strategy analyzes the data
+   - If signal is BUY/SELL, bot executes the trade
+   - Logs everything to bot_X.log
+4. Continues running until you stop it
+
+Position Management:
+- Bot remembers positions even if restarted
+- Only holds ONE position at a time
+- Automatically sets stop loss and take profit
+- Sells on SELL signal or if stop loss hit
+
+Trading Logic:
+- First trade: Uses your configured trade_amount
+- Subsequent trades: Reinvests all available USDT
+- This compounds your profits over time!
+
+Author: Trading Bot
 """
+
 import sys
 import os
 import time
@@ -9,12 +43,20 @@ import logging
 from datetime import datetime
 from dotenv import load_dotenv
 
-# Load environment variables
+# Load environment variables from .env file
 load_dotenv()
 
+# Import our core modules
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'core'))
 from binance_client import BinanceClient
 from config import Config
-from twilio_notifier import TwilioNotifier
+
+# SMS notifications (optional)
+try:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'archive'))
+    from twilio_notifier import TwilioNotifier
+except ImportError:
+    TwilioNotifier = None  # SMS disabled if not available
 
 # Import all strategies
 from strategies.simple_profitable_strategy import SimpleProfitableStrategy

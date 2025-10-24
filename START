@@ -1,0 +1,27 @@
+SSH & Start Dashboard
+=====================
+
+# 1. SSH into your server
+ssh root@134.199.159.103
+
+# 2. Navigate to the bot directory
+cd tradingbot
+
+# 3. Start the dashboard (run in background)
+screen -dmS dashboard python3 simple_dash.py
+
+# 4. Verify it's running
+screen -ls
+
+# Done! Access from browser:
+http://134.199.159.103:5001
+
+---
+
+View dashboard output:
+screen -r dashboard
+# Press Ctrl+A then D to detach
+
+Stop dashboard:
+screen -S dashboard -X quit
+
