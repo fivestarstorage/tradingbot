@@ -10,8 +10,23 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import logging
 from datetime import datetime
-from news_monitor import NewsMonitor
-from ai_analyzer import AINewsAnalyzer
+
+# Try to import news modules from different locations
+try:
+    from archive.news_monitor import NewsMonitor
+    from archive.ai_analyzer import AINewsAnalyzer
+except ImportError:
+    try:
+        from utils.news_monitor import NewsMonitor
+        from utils.ai_analyzer import AINewsAnalyzer
+    except ImportError:
+        try:
+            from news_monitor import NewsMonitor
+            from ai_analyzer import AINewsAnalyzer
+        except ImportError:
+            # Modules not available - strategy won't work
+            NewsMonitor = None
+            AINewsAnalyzer = None
 
 logger = logging.getLogger(__name__)
 
