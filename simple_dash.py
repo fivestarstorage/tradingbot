@@ -1232,25 +1232,15 @@ HTML = '''<!DOCTYPE html>
                 if (!timerElem || !lastCheck) return;
                 
                 try {
-                    // Parse UTC timestamp from logs
-                    // Format: "2025-10-24T14:30:45Z" (ISO 8601 UTC)
-                    // JavaScript automatically converts to browser's local timezone
-                    const lastCheckDate = new Date(lastCheck);
+                    // Parse timestamp from logs (in server's local time)
+                    // Format: "2025-10-24 14:30:45"
+                    const lastCheckDate = new Date(lastCheck.replace(',', '.'));
                     
                     // Calculate next check (15 minutes later)
                     const nextCheckDate = new Date(lastCheckDate.getTime() + (15 * 60 * 1000));
                     const now = new Date();
                     
                     const diff = nextCheckDate - now;
-                    
-                    // Debug: show times in local timezone
-                    console.log('Timer debug:', {
-                        lastCheckUTC: lastCheck, 
-                        lastCheckLocal: lastCheckDate.toLocaleString(),
-                        nextCheckLocal: nextCheckDate.toLocaleString(),
-                        nowLocal: now.toLocaleString(),
-                        diffMinutes: Math.floor(diff / 60000)
-                    });
                     
                     if (diff <= 0) {
                         timerElem.textContent = 'checking now...';
