@@ -603,21 +603,23 @@ class BotRunner:
         """Generate and send trading summary SMS"""
         try:
             # Get current account value
-            account_info = self.client.get_account_info()
             account_value = 0.0
             
-            if account_info:
-                usdt_balance = account_info.get('usdt_total', 0)
-                account_value = usdt_balance
+            # Get USDT balance
+            usdt_balance = self.client.get_account_balance('USDT')
+            if usdt_balance:
+                usdt_amount = float(usdt_balance.get('free', 0)) + float(usdt_balance.get('locked', 0))
+                account_value += usdt_amount
                 
-                # Add value of crypto holdings
-                crypto_asset = self.symbol.replace('USDT', '')
-                crypto_balance = self.client.get_account_balance(crypto_asset)
-                if crypto_balance:
-                    crypto_amount = float(crypto_balance.get('free', 0)) + float(crypto_balance.get('locked', 0))
-                    if crypto_amount > 0:
-                        current_price = float(self.client.client.get_symbol_ticker(symbol=self.symbol)['price'])
-                        account_value += crypto_amount * current_price
+            # Add value of crypto holdings
+            crypto_asset = self.symbol.replace('USDT', '')
+            crypto_balance = self.client.get_account_balance(crypto_asset)
+            if crypto_balance:
+                crypto_amount = float(crypto_balance.get('free', 0)) + float(crypto_balance.get('locked', 0))
+                if crypto_amount > 0:
+                    current_price = float(self.client.client.get_symbol_ticker(symbol=self.symbol)['price'])
+                    crypto_value = crypto_amount * current_price
+                    account_value += crypto_value
             
             # Get current positions
             positions = []

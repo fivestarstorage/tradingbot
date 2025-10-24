@@ -20,3 +20,4 @@ echo "   • Simplified bot cards"
 echo "   • Manual SMS alerts"
 echo "   • Auto-refresh every 30s"
 
+

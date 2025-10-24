@@ -300,6 +300,65 @@ def overview():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/search-coins')
+def api_search_coins():
+    """Search for trending coins on Binance"""
+    try:
+        # Get 24h ticker data (sorted by volume)
+        tickers = bot_manager.client.client.get_ticker()
+        
+        # Filter USDT pairs and sort by volume
+        usdt_pairs = []
+        for ticker in tickers:
+            if ticker['symbol'].endswith('USDT'):
+                try:
+                    volume = float(ticker['quoteVolume'])
+                    price_change = float(ticker['priceChangePercent'])
+                    usdt_pairs.append({
+                        'symbol': ticker['symbol'],
+                        'price': float(ticker['lastPrice']),
+                        'volume': volume,
+                        'change_24h': price_change,
+                        'base_asset': ticker['symbol'].replace('USDT', '')
+                    })
+                except:
+                    continue
+        
+        # Sort by volume (highest first) and take top 20
+        usdt_pairs.sort(key=lambda x: x['volume'], reverse=True)
+        trending_coins = usdt_pairs[:20]
+        
+        return jsonify({
+            'success': True,
+            'coins': trending_coins
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/create-bot', methods=['POST'])
+def api_create_bot():
+    """Create a new bot"""
+    try:
+        data = request.get_json()
+        symbol = data.get('symbol')
+        strategy = data.get('strategy', 'volatile')
+        trade_amount = float(data.get('trade_amount', 50))
+        
+        if not symbol:
+            return jsonify({'success': False, 'error': 'Symbol is required'})
+        
+        # Create bot
+        success, message = bot_manager.create_bot(
+            name=f"{symbol.replace('USDT', '')} Bot",
+            symbol=symbol,
+            strategy=strategy,
+            trade_amount=trade_amount
+        )
+        
+        return jsonify({'success': success, 'message': message})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 @app.route('/api/bot/<int:bot_id>/start', methods=['POST'])
 def start_bot(bot_id):
     success, message = bot_manager.start_bot(bot_id)
@@ -670,6 +729,7 @@ HTML = '''<!DOCTYPE html>
             <h1>🚀 Trading Dashboard</h1>
             <div class="header-actions">
                 <button class="btn btn-secondary" onclick="updateDashboard()">🔄 Refresh</button>
+                <button class="btn btn-success" onclick="showAddCoinModal()">➕ Add Coin</button>
                 <button class="btn btn-primary" onclick="sendAlert()">📱 Send Alert</button>
             </div>
         </div>
@@ -768,6 +828,50 @@ HTML = '''<!DOCTYPE html>
                     <div style="display: flex; gap: 10px;">
                         <button class="btn btn-primary" onclick="saveBot()" style="flex: 1;">Save Changes</button>
                         <button class="btn btn-secondary" onclick="hideEditModal()" style="flex: 1;">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Add Coin Modal -->
+        <div id="add-coin-modal" class="modal">
+            <div class="modal-content" style="max-width: 600px;">
+                <div class="modal-header">
+                    <h2>➕ Add New Coin</h2>
+                    <button class="modal-close" onclick="hideAddCoinModal()">×</button>
+                </div>
+                <div class="modal-body">
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: 600;">Search Trending Coins:</label>
+                        <button class="btn btn-secondary" onclick="loadTrendingCoins()" style="width: 100%;">🔍 Load Trending Coins</button>
+                    </div>
+                    
+                    <div id="trending-coins" style="max-height: 300px; overflow-y: auto; margin-bottom: 20px; display: none;">
+                        <!-- Trending coins will be loaded here -->
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: 600;">Or Enter Symbol Manually:</label>
+                        <input type="text" id="manual-symbol" placeholder="e.g., BTCUSDT" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+                    </div>
+                    
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: 600;">Strategy:</label>
+                        <select id="new-bot-strategy" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+                            <option value="volatile">Volatile Coins (Technical Analysis)</option>
+                            <option value="ticker_news">Ticker News (AI + News)</option>
+                        </select>
+                    </div>
+                    
+                    <div style="margin-bottom: 20px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: 600;">Trade Amount (USDT):</label>
+                        <input type="number" id="new-bot-amount" min="50" step="10" value="50" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+                        <small style="color: #666;">Minimum $50 to ensure sellable positions</small>
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-primary" onclick="createBot()" style="flex: 1;">Create Bot</button>
+                        <button class="btn btn-secondary" onclick="hideAddCoinModal()" style="flex: 1;">Cancel</button>
                     </div>
                 </div>
             </div>
@@ -955,6 +1059,15 @@ HTML = '''<!DOCTYPE html>
                 const botId = card.getAttribute('data-bot-id');
                 const lastCheck = card.getAttribute('data-last-check');
                 const timerElem = document.getElementById(`timer-${botId}`);
+                
+                // Debug logging
+                if (timerElem) {
+                    if (!lastCheck) {
+                        timerElem.textContent = 'no data';
+                        timerElem.style.color = '#ff9800';
+                        return;
+                    }
+                }
                 
                 if (!timerElem || !lastCheck) return;
                 
@@ -1204,6 +1317,89 @@ HTML = '''<!DOCTYPE html>
                 if (data.success) {
                     hideEditModal();
                     updateDashboard();
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            });
+        }
+        
+        // Add Coin Modal Functions
+        function showAddCoinModal() {
+            document.getElementById('add-coin-modal').style.display = 'flex';
+        }
+        
+        function hideAddCoinModal() {
+            document.getElementById('add-coin-modal').style.display = 'none';
+            document.getElementById('trending-coins').style.display = 'none';
+            document.getElementById('trending-coins').innerHTML = '';
+        }
+        
+        function loadTrendingCoins() {
+            fetch('/api/search-coins')
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) {
+                        alert('Error loading coins: ' + data.error);
+                        return;
+                    }
+                    
+                    const container = document.getElementById('trending-coins');
+                    container.innerHTML = data.coins.map(coin => `
+                        <div class="coin-item" onclick="selectCoin('${coin.symbol}')" style="
+                            display: flex; justify-content: space-between; align-items: center; 
+                            padding: 10px; border: 1px solid #ddd; border-radius: 6px; 
+                            margin-bottom: 8px; cursor: pointer; background: #f9f9f9;
+                        ">
+                            <div>
+                                <strong>${coin.symbol}</strong>
+                                <br><small>${coin.base_asset} • $${coin.price.toFixed(4)}</small>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="color: ${coin.change_24h >= 0 ? '#4caf50' : '#f44336'};">
+                                    ${coin.change_24h >= 0 ? '+' : ''}${coin.change_24h.toFixed(2)}%
+                                </div>
+                                <small>Vol: $${(coin.volume / 1000000).toFixed(1)}M</small>
+                            </div>
+                        </div>
+                    `).join('');
+                    
+                    container.style.display = 'block';
+                });
+        }
+        
+        function selectCoin(symbol) {
+            document.getElementById('manual-symbol').value = symbol;
+            document.getElementById('trending-coins').style.display = 'none';
+        }
+        
+        function createBot() {
+            const symbol = document.getElementById('manual-symbol').value.trim().toUpperCase();
+            const strategy = document.getElementById('new-bot-strategy').value;
+            const amount = parseFloat(document.getElementById('new-bot-amount').value);
+            
+            if (!symbol) {
+                return alert('Please enter a symbol (e.g., BTCUSDT)');
+            }
+            
+            if (amount < 50) {
+                return alert('Minimum trade amount is $50');
+            }
+            
+            fetch('/api/create-bot', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    symbol: symbol,
+                    strategy: strategy,
+                    trade_amount: amount
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    hideAddCoinModal();
+                    updateDashboard();
+                    alert('Bot created successfully!');
                 } else {
                     alert('Error: ' + data.message);
                 }

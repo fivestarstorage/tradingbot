@@ -1,4 +1,1136 @@
-<!DOCTYPE html>
+"""
+Advanced Trading Management Dashboard
+
+Full-featured dashboard to manage multiple trading bots:
+- View all bots and their performance
+- Start/stop/edit bots
+- Adjust trade amounts
+- View balance and withdraw
+- Add new strategies
+"""
+from flask import Flask, render_template, jsonify, request
+import json
+import os
+import signal
+import subprocess
+from datetime import datetime
+from binance_client import BinanceClient
+from config import Config
+
+app = Flask(__name__)
+
+class BotManager:
+    def __init__(self):
+        self.bots_file = 'active_bots.json'
+        self.pids_file = 'bot_pids.json'
+        self.client = BinanceClient(
+            api_key=Config.BINANCE_API_KEY,
+            api_secret=Config.BINANCE_API_SECRET,
+            testnet=Config.USE_TESTNET
+        )
+        
+        # Auto-create bots for orphaned coins on startup
+        self._auto_create_bots_for_orphaned_coins()
+    
+    def get_bots(self):
+        """Load all active bots from file and check real status"""
+        if not os.path.exists(self.bots_file):
+            return []
+        
+        try:
+            with open(self.bots_file, 'r') as f:
+                bots = json.load(f)
+            
+            # Check actual screen session status and get position details
+            for bot in bots:
+                actual_status = self._check_bot_running(bot['id'])
+                if actual_status != bot['status']:
+                    # Update status to match reality
+                    bot['status'] = actual_status
+                
+                # Add position details
+                bot['position'] = self.get_bot_position(bot['id'])
+            
+            # Save corrected statuses
+            self.save_bots(bots)
+            
+            return bots
+        except:
+            return []
+    
+    def get_bot_position(self, bot_id):
+        """Extract current position details from bot logs"""
+        log_file = f'bot_{bot_id}.log'
+        
+        if not os.path.exists(log_file):
+            return None
+        
+        try:
+            # Read last 100 lines of log
+            with open(log_file, 'r') as f:
+                lines = f.readlines()[-100:]
+            
+            position_info = {
+                'has_position': False,
+                'symbol': None,
+                'entry_price': None,
+                'current_price': None,
+                'pnl_pct': 0,
+                'stop_loss': None,
+                'take_profit': None,
+                'ai_reasoning': None,
+                'news_headline': None,
+                'time_held': None
+            }
+            
+            # Parse logs for position info
+            for line in reversed(lines):
+                # Check for open position
+                if 'OPENED POSITION' in line or '📍 Position set' in line:
+                    position_info['has_position'] = True
+                    # Extract entry price
+                    if '@' in line and '$' in line:
+                        try:
+                            price_str = line.split('$')[1].split()[0]
+                            position_info['entry_price'] = float(price_str)
+                        except:
+                            pass
+                
+                # Check for closed position
+                if 'CLOSED POSITION' in line or '✅ Position cleared' in line:
+                    position_info['has_position'] = False
+                    break
+                
+                # Extract current symbol
+                if 'Symbol:' in line:
+                    try:
+                        position_info['symbol'] = line.split('Symbol:')[1].strip().split()[0]
+                    except:
+                        pass
+                
+                # Extract current P&L
+                if 'P&L:' in line:
+                    try:
+                        pnl_str = line.split('P&L:')[1].strip().split('%')[0]
+                        position_info['pnl_pct'] = float(pnl_str.replace('+', ''))
+                    except:
+                        pass
+                
+                # Extract current price
+                if 'Current:' in line and '$' in line:
+                    try:
+                        price_str = line.split('$')[1].split()[0]
+                        position_info['current_price'] = float(price_str)
+                    except:
+                        pass
+                
+                # Extract AI reasoning
+                if 'AI chose' in line or 'AI recommends' in line:
+                    try:
+                        position_info['ai_reasoning'] = line.split('|')[-1].strip()
+                    except:
+                        pass
+            
+            return position_info if position_info['has_position'] else None
+        except Exception as e:
+            print(f"Error reading bot position: {e}")
+            return None
+    
+    def _check_bot_running(self, bot_id):
+        """Check if bot screen session actually exists"""
+        try:
+            result = subprocess.run(
+                ['screen', '-ls'],
+                capture_output=True,
+                text=True
+            )
+            
+            # Check if bot_X appears in screen list
+            if f'bot_{bot_id}' in result.stdout:
+                return 'running'
+            else:
+                return 'stopped'
+        except:
+            return 'stopped'
+    
+    def save_bots(self, bots):
+        """Save bots to file"""
+        with open(self.bots_file, 'w') as f:
+            json.dump(bots, f, indent=2)
+    
+    def add_bot(self, name, symbol, strategy, trade_amount):
+        """Add a new bot"""
+        bots = self.get_bots()
+        
+        new_bot = {
+            'id': len(bots) + 1,
+            'name': name,
+            'symbol': symbol,
+            'strategy': strategy,
+            'trade_amount': trade_amount,
+            'status': 'stopped',
+            'created': datetime.now().isoformat(),
+            'trades': 0,
+            'profit': 0.0
+        }
+        
+        bots.append(new_bot)
+        self.save_bots(bots)
+        return new_bot
+    
+    def update_bot(self, bot_id, updates):
+        """Update bot settings"""
+        bots = self.get_bots()
+        
+        for bot in bots:
+            if bot['id'] == bot_id:
+                bot.update(updates)
+                break
+        
+        self.save_bots(bots)
+    
+    def delete_bot(self, bot_id):
+        """Delete a bot"""
+        bots = self.get_bots()
+        bots = [b for b in bots if b['id'] != bot_id]
+        self.save_bots(bots)
+    
+    def _auto_create_bots_for_orphaned_coins(self):
+        """Auto-create bots for coins in wallet that aren't being managed"""
+        try:
+            print("\n🔍 Checking for orphaned coins...")
+            
+            # Get all account balances
+            account = self.client.client.get_account()
+            balances = account['balances']
+            
+            # Get existing bots - ROBUST duplicate checking
+            bots = self.get_bots()
+            managed_symbols = set()  # Store full symbols (e.g., BTCUSDT)
+            managed_assets = set()   # Store base assets (e.g., BTC)
+            
+            for bot in bots:
+                symbol = bot['symbol']
+                managed_symbols.add(symbol)  # Add full symbol
+                
+                # Extract base asset (remove USDT, BUSD suffixes)
+                base_asset = symbol.replace('USDT', '').replace('BUSD', '')
+                managed_assets.add(base_asset)
+            
+            print(f"   Currently managing {len(managed_assets)} coin(s): {', '.join(sorted(managed_assets))}")
+            
+            # Find coins with balance > 0 that aren't managed
+            orphaned_coins = []
+            for balance in balances:
+                asset = balance['asset']
+                free = float(balance['free'])
+                locked = float(balance['locked'])
+                total = free + locked
+                
+                # Skip USDT and coins with 0 balance
+                if asset == 'USDT' or total == 0:
+                    continue
+                
+                # ROBUST CHECK: Skip if already managed (by asset OR symbol)
+                trading_symbol = f"{asset}USDT"
+                if asset in managed_assets or trading_symbol in managed_symbols:
+                    continue
+                
+                # Check if this coin can be traded on Binance
+                if self.client.is_symbol_tradeable(trading_symbol):
+                    orphaned_coins.append({
+                        'asset': asset,
+                        'symbol': trading_symbol,
+                        'balance': total
+                    })
+            
+            # Auto-create bots for orphaned coins
+            if orphaned_coins:
+                print(f"\n⚠️  Found {len(orphaned_coins)} orphaned coin(s):")
+                for coin in orphaned_coins:
+                    print(f"   • {coin['asset']}: {coin['balance']:.8f}")
+                
+                # Get available USDT for allocation
+                usdt_balance = self.client.get_account_balance('USDT')
+                available_usdt = usdt_balance['free'] if usdt_balance else 0
+                
+                print(f"\n🤖 Auto-creating Volatile Coins Trading bots...")
+                print(f"   Each bot will: Technical analysis every 15min → Auto trading")
+                print(f"   Initial budget: $50 per bot (can adjust in dashboard)\n")
+                
+                for coin in orphaned_coins:
+                    # Create a bot with Volatile Coins strategy (pure technical, no AI)
+                    bot_name = f"⚡ {coin['asset']} Volatile Trader"
+                    
+                    # Simple: $50 per bot to start
+                    initial_amount = 50.0
+                    
+                    new_bot = self.add_bot(
+                        name=bot_name,
+                        symbol=coin['symbol'],
+                        strategy='volatile',
+                        trade_amount=initial_amount
+                    )
+                    
+                    print(f"   ✅ Created: {bot_name} (Bot #{new_bot['id']})")
+                    print(f"      Symbol: {coin['symbol']}")
+                    print(f"      Strategy: Volatile Coins (Technical Analysis)")
+                    print(f"      Initial Amount: ${initial_amount:.2f}")
+                    print(f"      Managing: Existing {coin['asset']} holdings")
+                    
+                    # AUTO-START the bot immediately!
+                    print(f"      🚀 Starting bot...")
+                    success, message = self.start_bot(new_bot['id'])
+                    if success:
+                        print(f"      ✅ Bot started successfully!")
+                    else:
+                        print(f"      ⚠️  Failed to start: {message}")
+                    
+                    # Small delay between bot starts to avoid overwhelming system
+                    import time
+                    time.sleep(2)
+                
+                print(f"\n✅ All bots created and started!")
+                print(f"   Check dashboard: http://localhost:5001\n")
+            else:
+                print("   ✅ All coins are already managed or have 0 balance\n")
+        
+        except Exception as e:
+            print(f"   ⚠️  Error checking orphaned coins: {e}\n")
+            import traceback
+            traceback.print_exc()
+    
+    def get_account_info(self):
+        """Get current account balance - shows ALL assets"""
+        try:
+            # Get all balances
+            account = self.client.client.get_account()
+            
+            total_value_usdt = 0.0
+            total_locked_usdt = 0.0
+            balances_list = []
+            
+            for balance in account['balances']:
+                free = float(balance['free'])
+                locked = float(balance['locked'])
+                
+                if free > 0 or locked > 0:
+                    asset = balance['asset']
+                    
+                    # Convert to USDT value
+                    if asset == 'USDT':
+                        value_usdt = free + locked
+                        free_usdt = free
+                        locked_usdt = locked
+                    else:
+                        # Get current price in USDT
+                        try:
+                            symbol = f"{asset}USDT"
+                            price = self.client.get_current_price(symbol)
+                            if price:
+                                value_usdt = (free + locked) * price
+                                free_usdt = free * price
+                                locked_usdt = locked * price
+                            else:
+                                continue
+                        except:
+                            continue
+                    
+                    total_value_usdt += value_usdt
+                    total_locked_usdt += locked_usdt
+                    
+                    balances_list.append({
+                        'asset': asset,
+                        'free': free,
+                        'locked': locked,
+                        'value_usdt': value_usdt
+                    })
+            
+            # Sort by value (highest first)
+            balances_list.sort(key=lambda x: x['value_usdt'], reverse=True)
+            
+            # Get USDT balance specifically
+            usdt_free = 0.0
+            usdt_locked = 0.0
+            for bal in balances_list:
+                if bal['asset'] == 'USDT':
+                    usdt_free = bal['free']
+                    usdt_locked = bal['locked']
+                    break
+            
+            return {
+                'available': total_value_usdt - total_locked_usdt,  # Total of all assets
+                'locked': total_locked_usdt,  # Total locked in orders
+                'total': total_value_usdt,  # Total of all assets
+                'usdt_available': usdt_free,  # USDT only (not locked)
+                'usdt_locked': usdt_locked,  # USDT locked in orders
+                'usdt_total': usdt_free + usdt_locked,  # Total USDT
+                'mode': 'TESTNET' if Config.USE_TESTNET else 'MAINNET',
+                'balances': balances_list[:10]  # Top 10 assets
+            }
+        
+        except Exception as e:
+            print(f"Error getting account info: {e}")
+            return {
+                'available': 0,
+                'locked': 0,
+                'total': 0,
+                'usdt_available': 0,
+                'usdt_locked': 0,
+                'usdt_total': 0,
+                'mode': 'TESTNET' if Config.USE_TESTNET else 'MAINNET',
+                'balances': [],
+                'error': str(e)
+            }
+    
+    def get_recent_trades(self, limit=20):
+        """Get recent trades from log files"""
+        today = datetime.now().strftime("%Y%m%d")
+        log_file = f'live_trading_{today}.log'
+        
+        trades = []
+        
+        if not os.path.exists(log_file):
+            return trades
+        
+        try:
+            with open(log_file, 'r') as f:
+                lines = f.readlines()
+            
+            for i, line in enumerate(lines):
+                if 'CLOSED POSITION' in line or 'OPENED POSITION' in line:
+                    trades.append({
+                        'time': line.split(' ')[0] + ' ' + line.split(' ')[1],
+                        'info': line.split(':', 2)[2].strip() if ':' in line else line
+                    })
+        except:
+            pass
+        
+        return trades[-limit:]
+    
+    def get_pids(self):
+        """Load bot PIDs from file"""
+        if not os.path.exists(self.pids_file):
+            return {}
+        
+        try:
+            with open(self.pids_file, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    
+    def save_pids(self, pids):
+        """Save bot PIDs to file"""
+        with open(self.pids_file, 'w') as f:
+            json.dump(pids, f, indent=2)
+    
+    def start_bot(self, bot_id):
+        """Actually start a bot trading process"""
+        bots = self.get_bots()
+        bot = None
+        
+        for b in bots:
+            if b['id'] == bot_id:
+                bot = b
+                break
+        
+        if not bot:
+            return False, "Bot not found"
+        
+        if bot['status'] == 'running':
+            return False, "Bot is already running"
+        
+        try:
+            # Start the bot process in background using screen
+            cmd = f"screen -dmS bot_{bot_id} python3 integrated_trader.py {bot_id} '{bot['name']}' {bot['symbol']} {bot['strategy']} {bot['trade_amount']}"
+            
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                # Update bot status
+                self.update_bot(bot_id, {'status': 'running'})
+                return True, f"✅ Bot '{bot['name']}' started successfully!"
+            else:
+                return False, f"Failed to start bot: {result.stderr}"
+        
+        except Exception as e:
+            return False, f"Error starting bot: {str(e)}"
+    
+    def stop_bot(self, bot_id):
+        """Stop a bot trading process"""
+        bots = self.get_bots()
+        bot = None
+        
+        for b in bots:
+            if b['id'] == bot_id:
+                bot = b
+                break
+        
+        if not bot:
+            return False, "Bot not found"
+        
+        if bot['status'] == 'stopped':
+            return False, "Bot is already stopped"
+        
+        try:
+            # Kill the screen session
+            cmd = f"screen -X -S bot_{bot_id} quit"
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            
+            # Update bot status
+            self.update_bot(bot_id, {'status': 'stopped'})
+            
+            return True, f"🛑 Bot '{bot['name']}' stopped successfully!"
+        
+        except Exception as e:
+            return False, f"Error stopping bot: {str(e)}"
+
+manager = BotManager()
+
+# ==================== ROUTES ====================
+
+@app.route('/')
+def index():
+    """Main dashboard page - always serve fresh (no cache)"""
+    # Regenerate template from latest code
+    create_template()
+    
+    # Create response with cache-busting headers
+    from flask import make_response
+    response = make_response(render_template('advanced_dashboard.html'))
+    
+    # Prevent browser caching
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, public, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    
+    return response
+
+@app.route('/api/overview')
+def overview():
+    """Get account overview"""
+    try:
+        account = manager.get_account_info()
+        bots = manager.get_bots()
+        trades = manager.get_recent_trades(20)
+        
+        return jsonify({
+            'success': True,
+            'account': account,
+            'bots': bots,
+            'trades': trades,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/sentiment')
+def get_sentiment():
+    """Get AI sentiment analysis data for dashboard"""
+    try:
+        from ai_sentiment_tracker import AISentimentTracker
+        tracker = AISentimentTracker()
+        data = tracker.get_dashboard_data()
+        
+        return jsonify({
+            'success': True,
+            **data
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/git/status')
+def get_git_status():
+    """Get git repository status"""
+    try:
+        import subprocess
+        import sys
+        
+        # Get current branch
+        branch = subprocess.check_output(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], cwd='.').decode('utf-8').strip()
+        
+        # Get latest commit info
+        commit_hash = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'], cwd='.').decode('utf-8').strip()
+        commit_message = subprocess.check_output(['git', 'log', '-1', '--pretty=%B'], cwd='.').decode('utf-8').strip()
+        commit_author = subprocess.check_output(['git', 'log', '-1', '--pretty=%an'], cwd='.').decode('utf-8').strip()
+        commit_date = subprocess.check_output(['git', 'log', '-1', '--pretty=%ar'], cwd='.').decode('utf-8').strip()
+        
+        # Get uncommitted changes
+        status_output = subprocess.check_output(['git', 'status', '--porcelain'], cwd='.').decode('utf-8').strip()
+        has_changes = len(status_output) > 0
+        changes_count = len(status_output.split('\n')) if status_output else 0
+        
+        # Fetch remote info
+        try:
+            subprocess.check_output(['git', 'fetch'], cwd='.', stderr=subprocess.DEVNULL)
+        except:
+            pass
+        
+        # Compare with remote
+        try:
+            local = subprocess.check_output(['git', 'rev-parse', '@'], cwd='.').decode('utf-8').strip()
+            remote = subprocess.check_output(['git', 'rev-parse', '@{u}'], cwd='.').decode('utf-8').strip()
+            
+            if local == remote:
+                remote_status = 'up-to-date'
+                behind = 0
+                ahead = 0
+            else:
+                # Count commits behind/ahead
+                behind_output = subprocess.check_output(['git', 'rev-list', '--count', 'HEAD..@{u}'], cwd='.').decode('utf-8').strip()
+                ahead_output = subprocess.check_output(['git', 'rev-list', '--count', '@{u}..HEAD'], cwd='.').decode('utf-8').strip()
+                behind = int(behind_output) if behind_output else 0
+                ahead = int(ahead_output) if ahead_output else 0
+                
+                if behind > 0 and ahead > 0:
+                    remote_status = 'diverged'
+                elif behind > 0:
+                    remote_status = 'behind'
+                elif ahead > 0:
+                    remote_status = 'ahead'
+                else:
+                    remote_status = 'up-to-date'
+        except:
+            remote_status = 'unknown'
+            behind = 0
+            ahead = 0
+        
+        # Get Python version
+        python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        
+        # Get working directory
+        working_dir = os.getcwd()
+        
+        return jsonify({
+            'success': True,
+            'branch': branch,
+            'commit': {
+                'hash': commit_hash,
+                'message': commit_message,
+                'author': commit_author,
+                'date': commit_date
+            },
+            'status': {
+                'clean': not has_changes,
+                'changes_count': changes_count
+            },
+            'remote': {
+                'status': remote_status,
+                'behind': behind,
+                'ahead': ahead
+            },
+            'python_version': python_version,
+            'working_dir': working_dir
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        })
+
+@app.route('/api/dashboard/restart', methods=['POST'])
+def restart_dashboard():
+    """Restart the dashboard server"""
+    try:
+        import subprocess
+        import threading
+        import time
+        
+        def do_restart():
+            time.sleep(1)  # Give time to send response
+            # Kill current dashboard screen and restart
+            subprocess.run(['screen', '-S', 'dashboard', '-X', 'quit'])
+            subprocess.run(['screen', '-dmS', 'dashboard', 'python3', 'advanced_dashboard.py'])
+        
+        # Schedule restart in background
+        thread = threading.Thread(target=do_restart)
+        thread.daemon = True
+        thread.start()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Dashboard restart initiated. Page will refresh in 5 seconds...'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+@app.route('/api/send_alert', methods=['POST'])
+def send_alert():
+    """Manually send trading summary SMS"""
+    try:
+        from twilio_notifier import TwilioNotifier
+        
+        # Get all bots and calculate totals
+        bots = bot_manager.get_bots()
+        running_bots = [b for b in bots if b['status'] == 'running']
+        
+        # Get account info
+        account_info = bot_manager.client.get_account_info()
+        
+        if not account_info:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to fetch account info'
+            })
+        
+        # Calculate totals
+        total_trades = sum(bot.get('trades', 0) for bot in bots)
+        total_profit = sum(bot.get('profit', 0) for bot in bots)
+        account_value = account_info.get('usdt_total', 0)
+        
+        # Get positions
+        positions = []
+        for bot in running_bots:
+            symbol = bot['symbol'].replace('USDT', '')
+            if symbol not in positions:
+                positions.append(symbol)
+        
+        # Prepare summary data
+        summary_data = {
+            'bot_name': f"Trading Dashboard ({len(running_bots)} bots)",
+            'period': 'Manual Alert',
+            'total_trades': total_trades,
+            'buys': 0,  # Not tracked at dashboard level
+            'sells': 0,  # Not tracked at dashboard level
+            'total_profit': total_profit,
+            'profit_percent': 0.0,  # Could calculate if needed
+            'current_positions': positions,
+            'account_value': account_value
+        }
+        
+        # Send SMS
+        notifier = TwilioNotifier()
+        result = notifier.send_summary(summary_data)
+        
+        if result:
+            return jsonify({
+                'success': True,
+                'message': 'Trading alert sent successfully!'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to send SMS'
+            })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+@app.route('/api/coin/<symbol>')
+def get_coin_details(symbol):
+    """Get detailed information about a specific coin"""
+    try:
+        manager = BotManager()
+        
+        # Find which bots are managing this symbol
+        bots = manager.get_bots()
+        managing_bots = []
+        
+        for bot in bots:
+            if bot['symbol'].startswith(symbol) or bot['symbol'] == f"{symbol}USDT":
+                bot_info = {
+                    'id': bot['id'],
+                    'name': bot['name'],
+                    'status': bot['status'],
+                    'strategy': bot['strategy'],
+                    'position': bot.get('position', None)
+                }
+                managing_bots.append(bot_info)
+        
+        # Get current balance
+        coin_balance = manager.client.get_account_balance(symbol)
+        free_balance = float(coin_balance.get('free', 0)) if coin_balance else 0
+        locked_balance = float(coin_balance.get('locked', 0)) if coin_balance else 0
+        total_balance = free_balance + locked_balance
+        
+        # Get current price
+        trading_symbol = f"{symbol}USDT"
+        current_price = 0
+        try:
+            ticker = manager.client.client.get_symbol_ticker(symbol=trading_symbol)
+            current_price = float(ticker['price']) if ticker else 0
+        except:
+            pass
+        
+        # Calculate USDT value
+        usdt_value = total_balance * current_price
+        
+        # Get historical trades for this symbol
+        trade_history = []
+        import glob
+        log_files = glob.glob('bot_*.log')
+        
+        for log_file in log_files:
+            try:
+                with open(log_file, 'r') as f:
+                    lines = f.readlines()
+                
+                for line in lines[-200:]:  # Last 200 lines
+                    if symbol in line and ('BUY' in line or 'SELL' in line):
+                        trade_history.append(line.strip())
+            except:
+                pass
+        
+        # Load position files for more details
+        position_details = []
+        for bot in managing_bots:
+            position_file = f"bot_{bot['id']}_position.json"
+            if os.path.exists(position_file):
+                try:
+                    with open(position_file, 'r') as f:
+                        pos_data = json.load(f)
+                        position_details.append({
+                            'bot_id': bot['id'],
+                            'bot_name': bot['name'],
+                            **pos_data
+                        })
+                except:
+                    pass
+        
+        return jsonify({
+            'success': True,
+            'symbol': symbol,
+            'balance': {
+                'free': free_balance,
+                'locked': locked_balance,
+                'total': total_balance
+            },
+            'price': {
+                'current': current_price,
+                'usdt_value': usdt_value
+            },
+            'managing_bots': managing_bots,
+            'position_details': position_details,
+            'trade_history': trade_history[-10:],  # Last 10 trades
+            'is_being_managed': len(managing_bots) > 0
+        })
+    
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        })
+
+@app.route('/api/bot/<int:bot_id>/details')
+def get_bot_details(bot_id):
+    """Get comprehensive details about a specific bot"""
+    try:
+        manager = BotManager()
+        bots = manager.get_bots()
+        
+        # Find the bot
+        bot = next((b for b in bots if b['id'] == bot_id), None)
+        if not bot:
+            return jsonify({'success': False, 'error': 'Bot not found'})
+        
+        # Load position file for investment details
+        position_file = f"bot_{bot_id}_position.json"
+        investment_details = {
+            'initial_investment': bot.get('trade_amount', 0),
+            'capital_additions': [],
+            'total_investment': bot.get('trade_amount', 0),
+            'has_traded': False
+        }
+        
+        if os.path.exists(position_file):
+            try:
+                with open(position_file, 'r') as f:
+                    pos_data = json.load(f)
+                    investment_details.update({
+                        'initial_investment': pos_data.get('initial_investment', bot.get('trade_amount', 0)),
+                        'capital_additions': pos_data.get('capital_additions', []),
+                        'has_traded': pos_data.get('has_traded', False)
+                    })
+                    total_added = sum(add['amount'] for add in investment_details['capital_additions'])
+                    investment_details['total_investment'] = investment_details['initial_investment'] + total_added
+            except:
+                pass
+        
+        # Get bot-specific logs
+        bot_logs = []
+        log_file = f"bot_{bot_id}.log"
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, 'r') as f:
+                    lines = f.readlines()
+                
+                for line in lines[-100:]:  # Last 100 lines
+                    if len(line) > 20:
+                        bot_logs.append(line.strip())
+            except:
+                pass
+        
+        # Parse trades from logs
+        trades = []
+        for line in bot_logs:
+            if 'OPENED POSITION' in line or 'CLOSED POSITION' in line:
+                trades.append({
+                    'timestamp': line.split(' - ')[0] if ' - ' in line else '',
+                    'action': 'BUY' if 'OPENED' in line else 'SELL',
+                    'details': line.split(':')[1].strip() if ':' in line else line
+                })
+        
+        # Get current position from bot data
+        current_position = bot.get('position', None)
+        
+        return jsonify({
+            'success': True,
+            'bot': {
+                'id': bot['id'],
+                'name': bot['name'],
+                'symbol': bot['symbol'],
+                'strategy': bot['strategy'],
+                'status': bot['status'],
+                'trade_amount': bot['trade_amount'],
+                'trades_count': bot.get('trades', 0),
+                'profit': bot.get('profit', 0)
+            },
+            'investment': investment_details,
+            'current_position': current_position,
+            'trade_history': trades[-20:],  # Last 20 trades
+            'recent_logs': bot_logs[-50:]  # Last 50 log lines
+        })
+    
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        })
+
+@app.route('/api/logs')
+def get_logs():
+    """Get all bot logs with filtering"""
+    try:
+        bot_id = request.args.get('bot_id', None)
+        log_type = request.args.get('type', None)
+        search = request.args.get('search', '').lower()
+        limit = int(request.args.get('limit', 200))
+        
+        logs = []
+        
+        # Get all log files
+        import glob
+        log_files = glob.glob('bot_*.log') + glob.glob('live_trading_*.log')
+        
+        for log_file in sorted(log_files, reverse=True):
+            try:
+                with open(log_file, 'r') as f:
+                    lines = f.readlines()
+                
+                for line in lines[-500:]:  # Last 500 lines per file
+                    if len(line) < 20:
+                        continue
+                    
+                    try:
+                        parts = line.split(' - ')
+                        if len(parts) < 3:
+                            continue
+                        
+                        timestamp = parts[0]
+                        level = parts[1]
+                        message = ' - '.join(parts[2:]).strip()
+                        
+                        # Determine log type
+                        msg_lower = message.lower()
+                        if 'opened position' in msg_lower or '🟢' in message:
+                            type_tag = 'buy'
+                        elif 'closed position' in msg_lower or '🔴' in message:
+                            type_tag = 'sell'
+                        elif 'signal' in msg_lower or 'analyzing' in msg_lower:
+                            type_tag = 'signal'
+                        elif 'error' in msg_lower or 'failed' in msg_lower:
+                            type_tag = 'error'
+                        elif 'waiting' in msg_lower or 'hold' in msg_lower:
+                            type_tag = 'hold'
+                        else:
+                            type_tag = 'info'
+                        
+                        # Extract bot ID from filename
+                        if log_file.startswith('bot_'):
+                            file_bot_id = log_file.split('_')[1].split('.')[0]
+                        else:
+                            file_bot_id = 'main'
+                        
+                        # Apply filters
+                        if bot_id and file_bot_id != bot_id:
+                            continue
+                        
+                        if log_type and type_tag != log_type:
+                            continue
+                        
+                        if search and search not in message.lower():
+                            continue
+                        
+                        logs.append({
+                            'timestamp': timestamp,
+                            'level': level,
+                            'message': message,
+                            'type': type_tag,
+                            'bot_id': file_bot_id,
+                            'file': log_file
+                        })
+                    
+                    except:
+                        continue
+            
+            except:
+                continue
+        
+        # Sort by timestamp (newest first)
+        logs.sort(key=lambda x: x['timestamp'], reverse=True)
+        
+        return jsonify({
+            'success': True,
+            'logs': logs[:limit],
+            'total': len(logs)
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+@app.route('/api/bot/add', methods=['POST'])
+def add_bot():
+    """Add a new bot"""
+    try:
+        data = request.json
+        bot = manager.add_bot(
+            name=data['name'],
+            symbol=data['symbol'],
+            strategy=data['strategy'],
+            trade_amount=float(data['trade_amount'])
+        )
+        return jsonify({'success': True, 'bot': bot})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/bot/<int:bot_id>/update', methods=['POST'])
+def update_bot(bot_id):
+    """Update bot settings"""
+    try:
+        data = request.json
+        manager.update_bot(bot_id, data)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/bot/<int:bot_id>/delete', methods=['POST'])
+def delete_bot(bot_id):
+    """Delete a bot"""
+    try:
+        manager.delete_bot(bot_id)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/bot/<int:bot_id>/start', methods=['POST'])
+def start_bot(bot_id):
+    """Start a bot - actually spawns the trading process"""
+    try:
+        success, message = manager.start_bot(bot_id)
+        return jsonify({'success': success, 'message': message})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/bot/<int:bot_id>/stop', methods=['POST'])
+def stop_bot(bot_id):
+    """Stop a bot - kills the trading process"""
+    try:
+        success, message = manager.stop_bot(bot_id)
+        return jsonify({'success': success, 'message': message})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/bot/<int:bot_id>/add_funds', methods=['POST'])
+def add_funds_to_bot(bot_id):
+    """Add more funds to an existing bot"""
+    try:
+        data = request.json
+        amount = float(data.get('amount', 0))
+        
+        if amount <= 0:
+            return jsonify({'success': False, 'error': 'Amount must be greater than 0'})
+        
+        # Get available USDT balance
+        usdt_balance = manager.client.get_account_balance('USDT')
+        available = float(usdt_balance.get('free', 0)) if usdt_balance else 0
+        
+        if available < amount:
+            return jsonify({
+                'success': False, 
+                'error': f'Insufficient USDT. Available: ${available:.2f}, Requested: ${amount:.2f}'
+            })
+        
+        # Update bot's position file if it exists
+        position_file = f'bot_{bot_id}_position.json'
+        if os.path.exists(position_file):
+            import json
+            with open(position_file, 'r') as f:
+                position_data = json.load(f)
+            
+            # Track capital additions
+            if 'capital_additions' not in position_data:
+                position_data['capital_additions'] = []
+            
+            position_data['capital_additions'].append({
+                'amount': amount,
+                'timestamp': datetime.now().isoformat()
+            })
+            
+            # Update initial investment
+            old_investment = position_data.get('initial_investment', 0)
+            position_data['initial_investment'] = old_investment + amount
+            
+            with open(position_file, 'w') as f:
+                json.dump(position_data, f, indent=2)
+            
+            return jsonify({
+                'success': True,
+                'message': f'Added ${amount:.2f} to bot. Total investment now: ${position_data["initial_investment"]:.2f}',
+                'new_total': position_data['initial_investment']
+            })
+        else:
+            # Bot hasn't traded yet, just update trade_amount
+            bots = manager.get_bots()
+            for bot in bots:
+                if bot['id'] == bot_id:
+                    old_amount = bot['trade_amount']
+                    bot['trade_amount'] = old_amount + amount
+                    manager.save_bots(bots)
+                    return jsonify({
+                        'success': True,
+                        'message': f'Added ${amount:.2f} to bot. Initial investment set to: ${bot["trade_amount"]:.2f}',
+                        'new_total': bot['trade_amount']
+                    })
+            
+            return jsonify({'success': False, 'error': 'Bot not found'})
+        
+    except Exception as e:
+        import traceback
+        return jsonify({
+            'success': False, 
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        })
+
+
+# ==================== HTML TEMPLATE ====================
+
+HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -1059,7 +2191,7 @@ tail -f /root/tradingbot/auto_update.log`);
                     // Show error if present
                     if (result.account.error) {
                         console.error('Account error:', result.account.error);
-                        alert('API Error: ' + result.account.error + '\n\nCheck your .env file and API keys!');
+                        alert('API Error: ' + result.account.error + '\\n\\nCheck your .env file and API keys!');
                     }
                     
                     // Update assets
@@ -1380,14 +2512,14 @@ tail -f /root/tradingbot/auto_update.log`);
         
         // Start/Stop bot
         function startBot(botId) {
-            if (!confirm('Start this bot?\n\nThis will begin LIVE TRADING with real orders!')) return;
+            if (!confirm('Start this bot?\\n\\nThis will begin LIVE TRADING with real orders!')) return;
             
             fetch(`/api/bot/${botId}/start`, {method: 'POST'})
                 .then(response => response.json())
                 .then(result => {
                     if (result.success) {
                         updateDashboard();
-                        alert(result.message + '\n\nBot is now trading live! Check logs with:\nscreen -r bot_' + botId);
+                        alert(result.message + '\\n\\nBot is now trading live! Check logs with:\\nscreen -r bot_' + botId);
                     } else {
                         alert('Error: ' + (result.error || result.message));
                     }
@@ -1395,7 +2527,7 @@ tail -f /root/tradingbot/auto_update.log`);
         }
         
         function stopBot(botId) {
-            if (!confirm('Stop this bot?\n\nThis will halt all trading immediately.')) return;
+            if (!confirm('Stop this bot?\\n\\nThis will halt all trading immediately.')) return;
             
             fetch(`/api/bot/${botId}/stop`, {method: 'POST'})
                 .then(response => response.json())
@@ -2006,4 +3138,52 @@ tail -f /root/tradingbot/auto_update.log`);
         console.log('✅ Modal functions available:', typeof showAddBotModal === 'function');
     </script>
 </body>
-</html>
+</html>"""
+
+def create_template():
+    """Create templates directory and HTML file"""
+    os.makedirs('templates', exist_ok=True)
+    with open('templates/advanced_dashboard.html', 'w') as f:
+        f.write(HTML_TEMPLATE)
+
+def main():
+    """Run the advanced dashboard"""
+    print("=" * 70)
+    print("🌐 ADVANCED TRADING DASHBOARD")
+    print("=" * 70)
+    print()
+    
+    # Validate config
+    try:
+        Config.validate()
+    except ValueError as e:
+        print(f"❌ Configuration error: {e}")
+        return
+    
+    print(f"✓ Mode: {'TESTNET' if Config.USE_TESTNET else 'MAINNET'}")
+    
+    # Create template
+    create_template()
+    
+    print("\n🚀 Starting advanced dashboard...")
+    print("\nAccess dashboard at:")
+    print("  http://localhost:5000")
+    print("  http://127.0.0.1:5000")
+    print("\n✨ Features:")
+    print("  • Manage multiple trading bots")
+    print("  • Start/stop/edit bots")
+    print("  • Adjust trade amounts")
+    print("  • View real-time performance")
+    print("\nPress Ctrl+C to stop\n")
+    
+    app.run(host='0.0.0.0', port=5001, debug=False)
+
+if __name__ == '__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n\n✅ Dashboard stopped")
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        print("\nTo install Flask:")
+        print("  pip install flask")
