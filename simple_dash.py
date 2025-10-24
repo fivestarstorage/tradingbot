@@ -269,13 +269,17 @@ def overview():
                     try:
                         with open(log_file, 'r') as f:
                             lines = f.readlines()
-                            # Look for recent signal generation
+                            # Look for recent signal generation or any recent activity
                             for line in reversed(lines[-50:]):  # Check last 50 lines
-                                if 'Signal:' in line or 'Generating signal' in line:
+                                if any(keyword in line for keyword in ['Signal:', 'Generating signal', 'BUY Signal', 'SELL Signal', 'Analyzing', 'Checking']):
                                     parts = line.split()
                                     if len(parts) >= 2:
-                                        last_check = f"{parts[0]} {parts[1]}"
-                                        break
+                                        # Extract timestamp from log line
+                                        timestamp = f"{parts[0]} {parts[1]}"
+                                        # Validate it looks like a timestamp
+                                        if len(parts[0]) == 10 and len(parts[1]) >= 8:  # YYYY-MM-DD HH:MM:SS
+                                            last_check = timestamp
+                                            break
                     except:
                         pass
                 bot['last_check'] = last_check
@@ -1072,8 +1076,9 @@ HTML = '''<!DOCTYPE html>
                 if (!timerElem || !lastCheck) return;
                 
                 try {
-                    // Parse last check time (format: "2025-10-20 14:30:45,123")
-                    const lastCheckDate = new Date(lastCheck.replace(',', '.'));
+                    // Parse last check time (format: "2025-10-20 14:30:45" or "2025-10-20 14:30:45,123")
+                    let cleanTime = lastCheck.replace(',', '.');
+                    const lastCheckDate = new Date(cleanTime);
                     const nextCheckDate = new Date(lastCheckDate.getTime() + (15 * 60 * 1000)); // +15 minutes
                     const now = new Date();
                     
@@ -1089,7 +1094,9 @@ HTML = '''<!DOCTYPE html>
                         timerElem.style.color = 'rgba(255,255,255,0.9)';
                     }
                 } catch (e) {
-                    timerElem.textContent = 'soon';
+                    console.log('Timer error:', e, 'for lastCheck:', lastCheck);
+                    timerElem.textContent = 'parsing error';
+                    timerElem.style.color = '#ff9800';
                 }
             });
         }

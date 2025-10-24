@@ -52,13 +52,28 @@ class BotRunner:
         
         # Setup logging (single log file per bot, no dates)
         log_file = f'bot_{bot_id}.log'
+        
+        # Custom formatter with timezone conversion
+        class TimezoneFormatter(logging.Formatter):
+            def formatTime(self, record, datefmt=None):
+                # Convert UTC to local timezone (adjust as needed)
+                import datetime
+                utc_time = datetime.datetime.utcfromtimestamp(record.created)
+                # Add your timezone offset here (e.g., +10 for Sydney, +8 for Singapore)
+                local_time = utc_time + datetime.timedelta(hours=10)  # Sydney time
+                return local_time.strftime('%Y-%m-%d %H:%M:%S')
+        
+        formatter = TimezoneFormatter('%(asctime)s - %(levelname)s - %(message)s')
+        
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(formatter)
+        
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        
         logging.basicConfig(
             level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(log_file),
-                logging.StreamHandler()
-            ]
+            handlers=[file_handler, console_handler]
         )
         self.logger = logging.getLogger(__name__)
         
