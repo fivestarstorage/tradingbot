@@ -1232,12 +1232,41 @@ HTML = '''<!DOCTYPE html>
                 if (!timerElem || !lastCheck) return;
                 
                 try {
-                    // Parse last check time (format: "2025-10-20 14:30:45" or "2025-10-20 14:30:45,123")
+                    // Parse last check time 
+                    // Old format: "2025-10-24 14:30:45" or "2025-10-24 14:30:45,123"
+                    // New format: "24/10/2025 02:30 PM"
                     let cleanTime = lastCheck.replace(',', '.').trim();
+                    let lastCheckDate;
                     
-                    // Force parse as local time (assumes browser and server are in same timezone)
-                    // If you see wrong countdowns, check server timezone vs browser timezone
-                    const lastCheckDate = new Date(cleanTime);
+                    // Try parsing new format first (dd/mm/yyyy hh:mm AM/PM)
+                    if (cleanTime.includes('/') && (cleanTime.includes('AM') || cleanTime.includes('PM'))) {
+                        // Parse: "24/10/2025 02:30 PM"
+                        const parts = cleanTime.split(' ');
+                        const dateParts = parts[0].split('/');
+                        const timeParts = parts[1].split(':');
+                        const ampm = parts[2];
+                        
+                        let hours = parseInt(timeParts[0]);
+                        const minutes = parseInt(timeParts[1]);
+                        
+                        // Convert to 24-hour format
+                        if (ampm === 'PM' && hours !== 12) hours += 12;
+                        if (ampm === 'AM' && hours === 12) hours = 0;
+                        
+                        // Create date: month is 0-indexed
+                        lastCheckDate = new Date(
+                            parseInt(dateParts[2]),  // year
+                            parseInt(dateParts[1]) - 1,  // month (0-indexed)
+                            parseInt(dateParts[0]),  // day
+                            hours,
+                            minutes,
+                            0
+                        );
+                    } else {
+                        // Old format fallback
+                        lastCheckDate = new Date(cleanTime);
+                    }
+                    
                     const nextCheckDate = new Date(lastCheckDate.getTime() + (15 * 60 * 1000)); // +15 minutes
                     const now = new Date();
                     

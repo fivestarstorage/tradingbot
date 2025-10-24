@@ -108,7 +108,8 @@ class BotRunner:
                 # Use local system timezone (automatically handles AEDT/AEST)
                 import datetime
                 local_time = datetime.datetime.fromtimestamp(record.created)
-                return local_time.strftime('%Y-%m-%d %H:%M:%S')
+                # Format: 24/10/2025 06:28 PM
+                return local_time.strftime('%d/%m/%Y %I:%M %p')
         
         formatter = TimezoneFormatter('%(asctime)s - %(levelname)s - %(message)s')
         
