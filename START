@@ -7,10 +7,13 @@ ssh root@134.199.159.103
 # 2. Navigate to the bot directory
 cd tradingbot
 
-# 3. Start the dashboard (run in background)
+# 3. AUTO-DETECT & START BOTS FOR ALL WALLET COINS ($25 each)
+python3 auto_manager.py
+
+# 4. Start the dashboard (run in background)
 screen -dmS dashboard python3 simple_dash.py
 
-# 4. Verify it's running
+# 5. Verify it's running
 screen -ls
 
 # Done! Access from browser:
