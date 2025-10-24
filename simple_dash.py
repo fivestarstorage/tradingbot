@@ -36,9 +36,14 @@ from datetime import datetime, timedelta
 
 # Import our core modules from the core/ folder
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'core'))
-from binance_client import BinanceClient
-from config import Config
+try:
+    from core.binance_client import BinanceClient
+    from core.config import Config
+except ImportError:
+    # Fallback for old structure
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'core'))
+    from binance_client import BinanceClient
+    from config import Config
 
 app = Flask(__name__)
 
@@ -323,6 +328,41 @@ class BotManager:
             
         except Exception as e:
             return False, f'Error creating bot: {str(e)}'
+    
+    def delete_bot(self, bot_id):
+        """Delete a bot"""
+        try:
+            bots = self.get_bots()
+            bot = next((b for b in bots if b['id'] == bot_id), None)
+            
+            if not bot:
+                return False, 'Bot not found'
+            
+            # Stop bot if running
+            if bot['status'] == 'running':
+                self.stop_bot(bot_id)
+            
+            # Remove from list
+            bots = [b for b in bots if b['id'] != bot_id]
+            
+            # Save updated list
+            with open(self.bots_file, 'w') as f:
+                json.dump(bots, f, indent=2)
+            
+            # Clean up files
+            import os
+            try:
+                if os.path.exists(f'bot_{bot_id}.log'):
+                    os.remove(f'bot_{bot_id}.log')
+                if os.path.exists(f'bot_{bot_id}_position.json'):
+                    os.remove(f'bot_{bot_id}_position.json')
+            except:
+                pass
+            
+            return True, f'Bot deleted successfully'
+            
+        except Exception as e:
+            return False, f'Error deleting bot: {str(e)}'
 
 bot_manager = BotManager()
 
@@ -475,10 +515,19 @@ def update_bot(bot_id):
     success, message = bot_manager.update_bot(bot_id, data)
     return jsonify({'success': success, 'message': message})
 
+@app.route('/api/bot/<int:bot_id>/delete', methods=['POST'])
+def delete_bot(bot_id):
+    """Delete a bot"""
+    success, message = bot_manager.delete_bot(bot_id)
+    return jsonify({'success': success, 'message': message})
+
 @app.route('/api/send_alert', methods=['POST'])
 def send_alert():
     try:
-        from twilio_notifier import TwilioNotifier
+        try:
+            from archive.twilio_notifier import TwilioNotifier
+        except ImportError:
+            from twilio_notifier import TwilioNotifier
         
         bots = bot_manager.get_bots()
         account = bot_manager.get_account_info()
@@ -1136,6 +1185,7 @@ HTML = '''<!DOCTYPE html>
                             `<button class="btn btn-sm btn-danger" onclick="stopBot(${bot.id})">Stop</button>` :
                             `<button class="btn btn-sm btn-success" onclick="startBot(${bot.id})">Start</button>`
                         }
+                        <button class="btn btn-sm" style="background: #dc3545;" onclick="deleteBot(${bot.id})">🗑️</button>
                     </div>
                 </div>
             `).join('');
@@ -1238,6 +1288,22 @@ HTML = '''<!DOCTYPE html>
                     .then(data => {
                         alert(data.success ? '✅ Alert sent!' : '❌ Error: ' + data.error);
                     });
+            }
+        }
+        
+        function deleteBot(id) {
+            if (confirm('Delete this bot? This will stop it and remove all data.')) {
+                fetch(`/api/bot/${id}/delete`, { method: 'POST' })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert('✅ Bot deleted!');
+                            updateDashboard();
+                        } else {
+                            alert('❌ Error: ' + data.message);
+                        }
+                    })
+                    .catch(e => alert('Error: ' + e));
             }
         }
         

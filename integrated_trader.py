@@ -47,16 +47,23 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import our core modules
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'core'))
-from binance_client import BinanceClient
-from config import Config
+try:
+    from core.binance_client import BinanceClient
+    from core.config import Config
+except ImportError:
+    # Fallback for old structure
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'core'))
+    from binance_client import BinanceClient
+    from config import Config
 
 # SMS notifications (optional)
 try:
-    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'archive'))
-    from twilio_notifier import TwilioNotifier
+    from archive.twilio_notifier import TwilioNotifier
 except ImportError:
-    TwilioNotifier = None  # SMS disabled if not available
+    try:
+        from twilio_notifier import TwilioNotifier
+    except ImportError:
+        TwilioNotifier = None  # SMS disabled if not available
 
 # Import all strategies
 from strategies.simple_profitable_strategy import SimpleProfitableStrategy
