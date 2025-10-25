@@ -1,4 +1,5 @@
 import os
+from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -12,6 +13,9 @@ from .trading_service import TradingService
 from core.binance_client import BinanceClient
 
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), '..', 'templates'))
+
+# Load environment from .env if present (project root)
+load_dotenv()
 
 app = FastAPI(title="TradingBot v2")
 

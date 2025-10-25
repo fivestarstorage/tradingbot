@@ -15,7 +15,7 @@ SYSTEM_PROMPT = (
 class AIDecider:
     def __init__(self, model: str = None):
         api_key = os.getenv('OPENAI_API_KEY')
-        self.client = OpenAI(api_key=api_key)
+        self.client = OpenAI(api_key=api_key) if api_key else None
         self.model = model or os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
 
     def decide(self, db: Session, symbols: List[str], lookback_minutes: int = 60) -> List[Signal]:
@@ -39,27 +39,64 @@ class AIDecider:
             for a in relevant[:30]
         ]
 
-        user_msg = {
-            'role': 'user',
-            'content': (
-                "Symbols: " + ", ".join(symbols) + "\n" +
-                "News JSON: " + str(items) + "\n" +
-                "Return a JSON list with objects {symbol, action, confidence, reasoning, ref_url}."
+        decisions = []
+        if self.client is not None:
+            user_msg = {
+                'role': 'user',
+                'content': (
+                    "Symbols: " + ", ".join(symbols) + "\n" +
+                    "News JSON: " + str(items) + "\n" +
+                    "Return a JSON list with objects {symbol, action, confidence, reasoning, ref_url}."
+                )
+            }
+
+            chat = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{'role': 'system', 'content': SYSTEM_PROMPT}, user_msg],
+                temperature=0.2
             )
-        }
+            content = chat.choices[0].message.content
 
-        chat = self.client.chat.completions.create(
-            model=self.model,
-            messages=[{'role': 'system', 'content': SYSTEM_PROMPT}, user_msg],
-            temperature=0.2
-        )
-        content = chat.choices[0].message.content
-
-        try:
-            import json
-            decisions = json.loads(content)
-        except Exception:
-            decisions = []
+            try:
+                import json
+                decisions = json.loads(content)
+            except Exception:
+                decisions = []
+        else:
+            # Fallback heuristic without OpenAI: majority sentiment per symbol
+            from collections import defaultdict
+            sym_counts = defaultdict(lambda: {'pos': 0, 'neg': 0, 'ref': None})
+            for a in relevant:
+                syms = [s.strip().upper() for s in (a.tickers or '').split(',') if s.strip()]
+                for s in symbols:
+                    base = s.replace('USDT', '')
+                    if base in syms:
+                        if (a.sentiment or '').lower().startswith('pos'):
+                            sym_counts[s]['pos'] += 1
+                        elif (a.sentiment or '').lower().startswith('neg'):
+                            sym_counts[s]['neg'] += 1
+                        if not sym_counts[s]['ref']:
+                            sym_counts[s]['ref'] = a.news_url
+            for s in symbols:
+                c = sym_counts[s]
+                action = 'HOLD'
+                confidence = 50
+                reasoning = 'Mixed or insufficient sentiment (fallback)'
+                if c['pos'] >= 3 and c['neg'] == 0:
+                    action = 'BUY'
+                    confidence = 70
+                    reasoning = f"Positive news count {c['pos']} with no negatives (fallback)"
+                elif c['neg'] >= 3 and c['pos'] == 0:
+                    action = 'SELL'
+                    confidence = 70
+                    reasoning = f"Negative news count {c['neg']} with no positives (fallback)"
+                decisions.append({
+                    'symbol': s,
+                    'action': action,
+                    'confidence': confidence,
+                    'reasoning': reasoning,
+                    'ref_url': c['ref']
+                })
 
         signals: List[Signal] = []
         for d in decisions:
