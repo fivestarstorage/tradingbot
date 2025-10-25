@@ -400,6 +400,12 @@ def fetch_and_store_news(db: Session, api_key: str):
                 skipped += 1
             continue
         tickers = item.get('tickers') or []
+        
+        # Prepare raw data - convert datetime to string for JSON serialization
+        raw_data = item.copy()
+        if raw_data.get('date') and isinstance(raw_data['date'], datetime):
+            raw_data['date'] = raw_data['date'].isoformat()
+        
         art = NewsArticle(
             news_url=news_url,
             image_url=item.get('image_url'),
@@ -410,7 +416,7 @@ def fetch_and_store_news(db: Session, api_key: str):
             sentiment=item.get('sentiment'),
             type=item.get('type'),
             tickers=','.join(tickers),
-            raw=item
+            raw=raw_data
         )
         db.add(art)
         inserted += 1
