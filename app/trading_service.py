@@ -6,10 +6,18 @@ from decimal import Decimal, ROUND_DOWN, getcontext
 
 getcontext().prec = 28
 
+# SMS notifications
+try:
+    from .twilio_notifier import TwilioNotifier
+except ImportError:
+    TwilioNotifier = None
+
 
 class TradingService:
     def __init__(self, client: BinanceClient):
         self.client = client
+        # Initialize SMS notifier
+        self.sms_notifier = TwilioNotifier() if TwilioNotifier else None
 
     def verify_buy(self, symbol: str, usdt_required: float) -> Dict[str, Any]:
         usdt = self.client.get_account_balance('USDT') or {'free': 0.0}
@@ -75,6 +83,22 @@ class TradingService:
         )
         db.add(pos)
         db.commit()
+        
+        # Send SMS notification
+        if self.sms_notifier:
+            try:
+                self.sms_notifier.send_trade_notification({
+                    'action': 'BUY',
+                    'symbol': symbol,
+                    'price': float(price),
+                    'quantity': float(quantity),
+                    'amount': float(usdt_amount),
+                    'bot_name': 'API Trading Bot',
+                    'reasoning': f'Bought {symbol} via API'
+                })
+            except Exception as e:
+                print(f"SMS notification error: {e}")
+        
         return trade
 
     def sell_market(self, db: Session, symbol: str, quantity: float) -> Optional[Trade]:
@@ -104,10 +128,34 @@ class TradingService:
         db.add(trade)
         # close latest open position for symbol
         pos = db.query(Position).filter(Position.symbol == symbol, Position.status == 'OPEN').order_by(Position.opened_at.desc()).first()
+        profit = 0.0
+        profit_pct = 0.0
         if pos:
             pos.status = 'CLOSED'
             pos.closed_at = None
+            # Calculate profit
+            if pos.entry_price:
+                profit = (float(price) - float(pos.entry_price)) * float(qty_dec)
+                profit_pct = ((float(price) - float(pos.entry_price)) / float(pos.entry_price)) * 100
         db.commit()
+        
+        # Send SMS notification
+        if self.sms_notifier:
+            try:
+                self.sms_notifier.send_trade_notification({
+                    'action': 'SELL',
+                    'symbol': symbol,
+                    'price': float(price),
+                    'quantity': float(qty_dec),
+                    'amount': float(price) * float(qty_dec),
+                    'bot_name': 'API Trading Bot',
+                    'profit': profit,
+                    'profit_percent': profit_pct,
+                    'reasoning': f'Sold {symbol} via API'
+                })
+            except Exception as e:
+                print(f"SMS notification error: {e}")
+        
         return trade
 
     def _get_symbol_filters(self, symbol: str) -> Tuple[Decimal, Decimal, Optional[Decimal]]:

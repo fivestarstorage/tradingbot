@@ -1,20 +1,62 @@
+# Trading Bot Environment Variables
+
+# ===== REQUIRED =====
+
 # Binance API Credentials
-BINANCE_API_KEY=your_api_key_here
-BINANCE_API_SECRET=your_api_secret_here
+BINANCE_API_KEY=your_binance_api_key
+BINANCE_API_SECRET=your_binance_secret
+USE_TESTNET=true  # Set to 'false' for real trading
 
-# Trading Configuration
-TRADING_SYMBOL=BTCUSDT
-TRADE_AMOUNT=0.001
-USE_TESTNET=true
+# OpenAI for AI Analysis & Chat
+OPENAI_API_KEY=sk-your-openai-key
 
-# Momentum Strategy Parameters
-RSI_PERIOD=14
-RSI_OVERBOUGHT=70
-RSI_OVERSOLD=30
-MOMENTUM_PERIOD=10
-CHECK_INTERVAL=60
+# ===== NEWS & DATA =====
 
-# Risk Management
-MAX_POSITION_SIZE=0.01
-STOP_LOSS_PERCENT=2.0
-TAKE_PROFIT_PERCENT=5.0
+# CryptoNews API (optional but recommended)
+CRYPTONEWS_API_KEY=your_cryptonews_key
+
+# Which coins to monitor for NEW opportunities
+WATCHLIST=BTC,ETH,SOL,XRP,DOGE
+
+# ===== AUTOMATED TRADING =====
+
+# Enable automatic trading for NEW coins from news signals
+AUTO_TRADE=false  # Set to 'true' to enable
+AUTO_TRADE_CONFIDENCE=75  # Minimum confidence to execute (0-100)
+AUTO_TRADE_USDT=25  # Amount to invest per trade
+
+# Enable automatic PORTFOLIO management for coins you already own
+PORTFOLIO_AUTO_MANAGE=false  # Set to 'true' to enable
+PORTFOLIO_ADD_USDT=25  # Amount when adding to existing positions
+
+# ===== SMS NOTIFICATIONS (Optional) =====
+
+# Twilio Credentials for SMS trade alerts
+TWILIO_ACCOUNT_SID=your_twilio_account_sid
+TWILIO_AUTH_TOKEN=your_twilio_auth_token
+
+# ===== OPTIONAL =====
+
+# OpenAI Model (default: gpt-4o-mini)
+OPENAI_MODEL=gpt-4o-mini
+
+# CORS for frontend
+CORS_ORIGIN=http://localhost:3000
+CORS_ORIGIN_2=http://localhost:3001
+
+# ===== TRADING MODES =====
+
+# Conservative (recommended for beginners):
+# AUTO_TRADE=false
+# PORTFOLIO_AUTO_MANAGE=false
+# → All trades require manual confirmation via chatbot
+
+# Semi-Automated (monitor closely):
+# AUTO_TRADE=true
+# PORTFOLIO_AUTO_MANAGE=false
+# → Auto-buys new opportunities, manual portfolio management
+
+# Fully Automated (experienced users):
+# AUTO_TRADE=true
+# PORTFOLIO_AUTO_MANAGE=true
+# → Fully autonomous trading (monitor regularly!)

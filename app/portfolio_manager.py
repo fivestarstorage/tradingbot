@@ -13,12 +13,20 @@ import openai
 import os
 import json
 
+# SMS notifications
+try:
+    from .twilio_notifier import TwilioNotifier
+except ImportError:
+    TwilioNotifier = None
+
 
 class PortfolioManager:
     def __init__(self, client: BinanceClient):
         self.client = client
         openai.api_key = os.getenv('OPENAI_API_KEY')
         self.model = os.getenv('OPENAI_MODEL', 'gpt-4o-mini')
+        # Initialize SMS notifier
+        self.sms_notifier = TwilioNotifier() if TwilioNotifier else None
     
     def get_portfolio_holdings(self):
         """Get all non-zero holdings from Binance."""
@@ -248,6 +256,27 @@ Trading philosophy:
                                     category='TRADE',
                                     message=f"Portfolio mgmt SELL: {symbol} qty={sell_qty:.6f}"
                                 ))
+                                
+                                # Send SMS notification
+                                if self.sms_notifier:
+                                    try:
+                                        current_price = analysis.get('current_price', 0)
+                                        profit = (current_price - analysis.get('entry_price', current_price)) * sell_qty
+                                        profit_pct = analysis.get('profit_percent', 0)
+                                        
+                                        self.sms_notifier.send_trade_notification({
+                                            'action': 'SELL',
+                                            'symbol': symbol,
+                                            'price': current_price,
+                                            'quantity': sell_qty,
+                                            'amount': current_price * sell_qty,
+                                            'bot_name': 'Portfolio Manager',
+                                            'profit': profit,
+                                            'profit_percent': profit_pct,
+                                            'reasoning': analysis['reasoning']
+                                        })
+                                    except Exception as e:
+                                        print(f"SMS notification error: {e}")
                         except Exception as e:
                             print(f"Error executing sell for {symbol}: {e}")
                 
@@ -268,6 +297,24 @@ Trading philosophy:
                                     category='TRADE',
                                     message=f"Portfolio mgmt BUY MORE: {symbol} ${add_amount}"
                                 ))
+                                
+                                # Send SMS notification
+                                if self.sms_notifier:
+                                    try:
+                                        current_price = analysis.get('current_price', 0)
+                                        quantity = add_amount / current_price if current_price > 0 else 0
+                                        
+                                        self.sms_notifier.send_trade_notification({
+                                            'action': 'BUY',
+                                            'symbol': symbol,
+                                            'price': current_price,
+                                            'quantity': quantity,
+                                            'amount': add_amount,
+                                            'bot_name': 'Portfolio Manager',
+                                            'reasoning': f"Adding to position: {analysis['reasoning']}"
+                                        })
+                                    except Exception as e:
+                                        print(f"SMS notification error: {e}")
                         except Exception as e:
                             print(f"Error adding to {symbol}: {e}")
         
