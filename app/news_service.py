@@ -145,7 +145,7 @@ Respond with valid JSON in this format:
         
     except Exception as e:
         print(f"Error analyzing article with AI: {e}")
-        return None, []
+        return "Neutral", []  # Default to Neutral if AI analysis fails
 
 
 def scrape_coindesk_news():
