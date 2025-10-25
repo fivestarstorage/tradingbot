@@ -783,6 +783,7 @@ def momentum_scanner_job():
     Continuous momentum scanner - runs every minute to detect rapid price movements
     """
     from .db import SessionLocal
+    from .models import MomentumTrade, BotLog
     
     # Check if momentum trading is enabled
     config_file = '/tmp/momentum_config.json'
