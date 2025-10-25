@@ -1,14 +1,184 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TradingBot v2 Dashboard</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+            margin: 20px;
+        }
+
+        h1 {
+            margin: 0 0 12px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            border-bottom: 1px solid #eee;
+            padding: 8px;
+            font-size: 14px;
+        }
+
+        th {
+            text-align: left;
+            background: #fafafa;
+        }
+
+        .pill {
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 12px;
+            display: inline-block;
+        }
+
+        .BUY {
+            background: #e6ffed;
+            color: #065f46;
+        }
+
+        .SELL {
+            background: #ffe6e6;
+            color: #7f1d1d;
+        }
+
+        .HOLD {
+            background: #eef2ff;
+            color: #3730a3;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>TradingBot v2</h1>
+    <div class="grid">
+        <div>
+            <h3>Recent News</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Title</th>
+                        <th>Tickers</th>
+                        <th>Sentiment</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for n in news %}
+                    <tr>
+                        <td><a href="{{ n.news_url }}" target="_blank">{{ n.title }}</a></td>
+                        <td>{{ n.tickers }}</td>
+                        <td>{{ n.sentiment }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div>
+            <h3>AI Signals</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Action</th>
+                        <th>Conf</th>
+                        <th>Reason</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in signals %}
+                    <tr>
+                        <td>{{ s.symbol }}</td>
+                        <td><span class="pill {{ s.action }}">{{ s.action }}</span></td>
+                        <td>{{ s.confidence }}</td>
+                        <td>{{ s.reasoning }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="grid" style="margin-top:16px;">
+        <div>
+            <h3>Open Positions</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Side</th>
+                        <th>Qty</th>
+                        <th>Entry</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in positions %}
+                    <tr>
+                        <td>{{ p.symbol }}</td>
+                        <td>{{ p.side }}</td>
+                        <td>{{ '%.6f' % p.quantity if p.quantity else '' }}</td>
+                        <td>{{ '%.4f' % p.entry_price if p.entry_price else '' }}</td>
+                        <td>{{ p.status }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div>
+            <h3>Recent Trades</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Side</th>
+                        <th>Qty</th>
+                        <th>Price</th>
+                        <th>Notional</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in trades %}
+                    <tr>
+                        <td>{{ t.symbol }}</td>
+                        <td>{{ t.side }}</td>
+                        <td>{{ '%.6f' % t.quantity }}</td>
+                        <td>{{ '%.4f' % t.price }}</td>
+                        <td>{{ '%.2f' % t.notional }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+
+</html>
+
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    
+
     <!-- Cache Busting: Force browser to always fetch fresh content -->
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    
+
     <title>Trading Management Dashboard</title>
     <style>
         * {
@@ -16,13 +186,13 @@
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #0a0a0f;
             color: #fff;
         }
-        
+
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             padding: 20px 40px;
@@ -30,61 +200,61 @@
             justify-content: space-between;
             align-items: center;
         }
-        
+
         .header h1 {
             font-size: 1.8em;
         }
-        
+
         .mode-badge {
             padding: 8px 20px;
-            background: rgba(255,255,255,0.2);
+            background: rgba(255, 255, 255, 0.2);
             border-radius: 20px;
             font-size: 0.9em;
         }
-        
+
         .container {
             max-width: 1400px;
             margin: 0 auto;
             padding: 30px;
         }
-        
+
         .account-summary {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 20px;
             margin-bottom: 30px;
         }
-        
+
         .summary-card {
             background: #16161f;
             padding: 20px;
             border-radius: 10px;
             border: 1px solid #2a2a3e;
         }
-        
+
         .summary-card.clickable {
             cursor: pointer;
             transition: all 0.2s;
         }
-        
+
         .summary-card.clickable:hover {
             transform: translateY(-2px);
             border-color: #667eea;
             box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
         }
-        
+
         .summary-card h3 {
             color: #888;
             font-size: 0.85em;
             margin-bottom: 10px;
             text-transform: uppercase;
         }
-        
+
         .summary-card .value {
             font-size: 1.8em;
             font-weight: bold;
         }
-        
+
         .section {
             background: #16161f;
             padding: 25px;
@@ -92,18 +262,18 @@
             border: 1px solid #2a2a3e;
             margin-bottom: 30px;
         }
-        
+
         .section-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 20px;
         }
-        
+
         .section h2 {
             font-size: 1.3em;
         }
-        
+
         .btn {
             padding: 10px 20px;
             background: #667eea;
@@ -114,118 +284,118 @@
             font-size: 0.9em;
             transition: all 0.2s;
         }
-        
+
         .btn:hover {
             background: #5568d3;
             transform: translateY(-2px);
         }
-        
+
         .btn-sm {
             padding: 6px 12px;
             font-size: 0.85em;
         }
-        
+
         .btn-success {
             background: #4caf50;
         }
-        
+
         .btn-success:hover {
             background: #45a049;
         }
-        
+
         .btn-danger {
             background: #f44336;
         }
-        
+
         .btn-danger:hover {
             background: #da190b;
         }
-        
+
         .btn-secondary {
             background: #555;
         }
-        
+
         .btn-secondary:hover {
             background: #666;
         }
-        
+
         .bots-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
             gap: 20px;
         }
-        
+
         .bot-card {
             background: #1a1a2e;
             padding: 20px;
             border-radius: 8px;
             border: 1px solid #2a2a3e;
         }
-        
+
         .bot-header {
             display: flex;
             justify-content: space-between;
             align-items: start;
             margin-bottom: 15px;
         }
-        
+
         .bot-title {
             font-size: 1.2em;
             font-weight: bold;
         }
-        
+
         .bot-status {
             padding: 4px 12px;
             border-radius: 12px;
             font-size: 0.8em;
             font-weight: bold;
         }
-        
+
         .bot-status.running {
             background: #4caf5033;
             color: #4caf50;
         }
-        
+
         .bot-status.stopped {
             background: #f4433633;
             color: #f44336;
         }
-        
+
         .bot-info {
             margin-bottom: 15px;
         }
-        
+
         .bot-info div {
             margin: 5px 0;
             font-size: 0.9em;
             color: #aaa;
         }
-        
+
         .bot-stats {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 10px;
             margin-bottom: 15px;
         }
-        
+
         .bot-stat {
             text-align: center;
             padding: 10px;
             background: #0f0f1e;
             border-radius: 5px;
         }
-        
+
         .bot-stat .label {
             font-size: 0.75em;
             color: #888;
             margin-bottom: 5px;
         }
-        
+
         .bot-stat .value {
             font-size: 1.1em;
             font-weight: bold;
         }
-        
+
         .position-panel {
             background: linear-gradient(135deg, #1a1a2e 0%, #0f0f1e 100%);
             border: 1px solid #2a2a3e;
@@ -233,7 +403,7 @@
             padding: 15px;
             margin: 15px 0;
         }
-        
+
         .position-header {
             font-weight: bold;
             color: #4caf50;
@@ -242,29 +412,29 @@
             align-items: center;
             gap: 8px;
         }
-        
+
         .position-details {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 10px;
             font-size: 0.9em;
         }
-        
+
         .position-detail {
             display: flex;
             justify-content: space-between;
             padding: 5px 0;
         }
-        
+
         .position-detail .label {
             color: #888;
         }
-        
+
         .position-detail .value {
             font-weight: bold;
             color: #fff;
         }
-        
+
         .ai-reasoning {
             margin-top: 10px;
             padding: 10px;
@@ -274,21 +444,21 @@
             font-size: 0.85em;
             color: #aaa;
         }
-        
+
         .bot-controls {
             display: flex;
             gap: 10px;
         }
-        
+
         .bot-controls button {
             flex: 1;
         }
-        
+
         .trades-list {
             max-height: 400px;
             overflow-y: auto;
         }
-        
+
         .trade-item {
             background: #1a1a2e;
             padding: 12px;
@@ -297,13 +467,13 @@
             border-left: 3px solid #667eea;
             font-size: 0.9em;
         }
-        
+
         .trade-time {
             color: #888;
             font-size: 0.85em;
             margin-bottom: 5px;
         }
-        
+
         .modal {
             display: none;
             position: fixed;
@@ -311,12 +481,12 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0,0,0,0.8);
+            background: rgba(0, 0, 0, 0.8);
             justify-content: center;
             align-items: center;
             z-index: 1000;
         }
-        
+
         .modal-content {
             background: #16161f;
             padding: 30px;
@@ -325,22 +495,22 @@
             width: 90%;
             border: 1px solid #2a2a3e;
         }
-        
+
         .modal h2 {
             margin-bottom: 20px;
         }
-        
+
         .form-group {
             margin-bottom: 15px;
         }
-        
+
         .form-group label {
             display: block;
             margin-bottom: 5px;
             color: #aaa;
             font-size: 0.9em;
         }
-        
+
         .form-group input,
         .form-group select {
             width: 100%;
@@ -351,36 +521,36 @@
             color: white;
             font-size: 1em;
         }
-        
+
         .form-actions {
             display: flex;
             gap: 10px;
             margin-top: 20px;
         }
-        
+
         .form-actions button {
             flex: 1;
         }
-        
+
         .empty-state {
             text-align: center;
             padding: 40px;
             color: #888;
         }
-        
+
         ::-webkit-scrollbar {
             width: 8px;
         }
-        
+
         ::-webkit-scrollbar-track {
             background: #1a1a2e;
         }
-        
+
         ::-webkit-scrollbar-thumb {
             background: #667eea;
             border-radius: 4px;
         }
-        
+
         .tabs {
             display: flex;
             gap: 5px;
@@ -388,7 +558,7 @@
             padding: 10px 20px 0 20px;
             border-bottom: 2px solid #2a2a3e;
         }
-        
+
         .tab {
             padding: 12px 24px;
             cursor: pointer;
@@ -399,194 +569,203 @@
             font-size: 1em;
             transition: all 0.2s;
         }
-        
+
         .tab:hover {
             background: #252535;
             color: #fff;
         }
-        
+
         .tab.active {
             background: #0d0d17;
             color: #667eea;
             font-weight: bold;
         }
-        
+
         .tab-content {
             display: none;
         }
-        
+
         .tab-content.active {
             display: block;
         }
     </style>
 </head>
+
 <body>
     <div class="header">
         <h1>🎯 Trading Management Dashboard</h1>
         <div class="mode-badge" id="mode">Loading...</div>
     </div>
-    
+
     <!-- Tab Navigation -->
     <div class="tabs">
         <button class="tab active" onclick="switchTab('overview')">📊 Overview</button>
         <button class="tab" onclick="switchTab('logs')">📋 Logs</button>
         <button class="tab" onclick="switchTab('system')">⚙️ System</button>
     </div>
-    
+
     <div class="container">
         <!-- Overview Tab Content -->
         <div id="overview-tab" class="tab-content active">
-        <!-- Account Summary -->
-        <div class="account-summary">
-            <div class="summary-card">
-                <h3>💰 Available Balance</h3>
-                <div class="value" id="available">Loading...</div>
-                <div style="font-size: 0.75em; color: #888; margin-top: 8px;">
-                    USDT not in orders
-                </div>
-            </div>
-            
-            <div class="summary-card">
-                <h3>🔒 In Orders</h3>
-                <div class="value" id="locked">Loading...</div>
-                <div style="font-size: 0.75em; color: #888; margin-top: 8px;">
-                    USDT locked in orders
-                </div>
-            </div>
-            
-            <div class="summary-card">
-                <h3>💵 Total Balance</h3>
-                <div class="value" id="total">Loading...</div>
-                <div style="font-size: 0.75em; color: #888; margin-top: 8px;">
-                    All assets (USDT value)
-                </div>
-            </div>
-        </div>
-        
-        <!-- Asset Breakdown -->
-        <div class="section">
-            <div class="section-header">
-                <h2>💎 Your Assets</h2>
-            </div>
-            <div id="assets-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px;">
-                <div class="empty-state">Loading assets...</div>
-            </div>
-        </div>
-        
-        <!-- Bots Section -->
-        <div class="section">
-            <div class="section-header">
-                <h2>🤖 Trading Bots</h2>
-                <div style="display: flex; gap: 10px;">
-                    <button class="btn btn-sm" onclick="updateDashboard()" title="Refresh status from actual screen sessions">🔄 Refresh Status</button>
-                    <button class="btn btn-sm" onclick="sendAlert()" style="background: #667eea;" title="Send trading summary SMS now">📱 Send Alert</button>
-                    <button class="btn" onclick="showAddBotModal()">➕ Add New Bot</button>
-                </div>
-            </div>
-            
-            <div class="bots-grid" id="bots-grid">
-                <div class="empty-state">No bots yet. Add your first bot!</div>
-            </div>
-        </div>
-        
-        <!-- AI Sentiment Analysis Dashboard -->
-        <div class="section">
-            <div class="section-header">
-                <h2>🧠 AI Sentiment Analysis</h2>
-                <button onclick="refreshSentiment()" class="btn btn-sm">🔄 Refresh</button>
-            </div>
-            
-            <!-- Sentiment Summary -->
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+            <!-- Account Summary -->
+            <div class="account-summary">
                 <div class="summary-card">
-                    <h3>🟢 Bullish</h3>
-                    <div class="value" style="color: #4caf50;" id="sentiment-positive">0%</div>
-                    <div style="color: #888; font-size: 0.9em;" id="sentiment-positive-count">0 articles</div>
+                    <h3>💰 Available Balance</h3>
+                    <div class="value" id="available">Loading...</div>
+                    <div style="font-size: 0.75em; color: #888; margin-top: 8px;">
+                        USDT not in orders
+                    </div>
                 </div>
+
                 <div class="summary-card">
-                    <h3>🔴 Bearish</h3>
-                    <div class="value" style="color: #f44336;" id="sentiment-negative">0%</div>
-                    <div style="color: #888; font-size: 0.9em;" id="sentiment-negative-count">0 articles</div>
+                    <h3>🔒 In Orders</h3>
+                    <div class="value" id="locked">Loading...</div>
+                    <div style="font-size: 0.75em; color: #888; margin-top: 8px;">
+                        USDT locked in orders
+                    </div>
                 </div>
+
                 <div class="summary-card">
-                    <h3>⚪ Neutral</h3>
-                    <div class="value" style="color: #888;" id="sentiment-neutral">0%</div>
-                    <div style="color: #888; font-size: 0.9em;" id="sentiment-neutral-count">0 articles</div>
-                </div>
-                <div class="summary-card">
-                    <h3>📰 Total Analyzed</h3>
-                    <div class="value" id="sentiment-total">0</div>
-                    <div style="color: #888; font-size: 0.9em;">articles</div>
+                    <h3>💵 Total Balance</h3>
+                    <div class="value" id="total">Loading...</div>
+                    <div style="font-size: 0.75em; color: #888; margin-top: 8px;">
+                        All assets (USDT value)
+                    </div>
                 </div>
             </div>
-            
-            <!-- Top Recommendations -->
-            <div style="background: #1e1e1e; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                <h3 style="margin-top: 0;">🎯 Top AI Recommendations</h3>
-                <div id="recommendations-list">
-                    <div class="empty-state">No recommendations yet...</div>
+
+            <!-- Asset Breakdown -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>💎 Your Assets</h2>
+                </div>
+                <div id="assets-list"
+                    style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px;">
+                    <div class="empty-state">Loading assets...</div>
                 </div>
             </div>
-            
-            <!-- Recent Analyses -->
-            <div style="background: #1e1e1e; padding: 15px; border-radius: 8px;">
-                <h3 style="margin-top: 0;">📊 Recent AI Analyses</h3>
-                <div id="analyses-list" style="max-height: 400px; overflow-y: auto;">
-                    <div class="empty-state">No analyses yet...</div>
+
+            <!-- Bots Section -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>🤖 Trading Bots</h2>
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-sm" onclick="updateDashboard()"
+                            title="Refresh status from actual screen sessions">🔄 Refresh Status</button>
+                        <button class="btn btn-sm" onclick="sendAlert()" style="background: #667eea;"
+                            title="Send trading summary SMS now">📱 Send Alert</button>
+                        <button class="btn" onclick="showAddBotModal()">➕ Add New Bot</button>
+                    </div>
+                </div>
+
+                <div class="bots-grid" id="bots-grid">
+                    <div class="empty-state">No bots yet. Add your first bot!</div>
                 </div>
             </div>
-        </div>
-        
-        <!-- Recent Trades -->
-        <div class="section">
-            <div class="section-header">
-                <h2>📊 Recent Trades</h2>
+
+            <!-- AI Sentiment Analysis Dashboard -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>🧠 AI Sentiment Analysis</h2>
+                    <button onclick="refreshSentiment()" class="btn btn-sm">🔄 Refresh</button>
+                </div>
+
+                <!-- Sentiment Summary -->
+                <div
+                    style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                    <div class="summary-card">
+                        <h3>🟢 Bullish</h3>
+                        <div class="value" style="color: #4caf50;" id="sentiment-positive">0%</div>
+                        <div style="color: #888; font-size: 0.9em;" id="sentiment-positive-count">0 articles</div>
+                    </div>
+                    <div class="summary-card">
+                        <h3>🔴 Bearish</h3>
+                        <div class="value" style="color: #f44336;" id="sentiment-negative">0%</div>
+                        <div style="color: #888; font-size: 0.9em;" id="sentiment-negative-count">0 articles</div>
+                    </div>
+                    <div class="summary-card">
+                        <h3>⚪ Neutral</h3>
+                        <div class="value" style="color: #888;" id="sentiment-neutral">0%</div>
+                        <div style="color: #888; font-size: 0.9em;" id="sentiment-neutral-count">0 articles</div>
+                    </div>
+                    <div class="summary-card">
+                        <h3>📰 Total Analyzed</h3>
+                        <div class="value" id="sentiment-total">0</div>
+                        <div style="color: #888; font-size: 0.9em;">articles</div>
+                    </div>
+                </div>
+
+                <!-- Top Recommendations -->
+                <div style="background: #1e1e1e; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                    <h3 style="margin-top: 0;">🎯 Top AI Recommendations</h3>
+                    <div id="recommendations-list">
+                        <div class="empty-state">No recommendations yet...</div>
+                    </div>
+                </div>
+
+                <!-- Recent Analyses -->
+                <div style="background: #1e1e1e; padding: 15px; border-radius: 8px;">
+                    <h3 style="margin-top: 0;">📊 Recent AI Analyses</h3>
+                    <div id="analyses-list" style="max-height: 400px; overflow-y: auto;">
+                        <div class="empty-state">No analyses yet...</div>
+                    </div>
+                </div>
             </div>
-            
-            <div class="trades-list" id="trades-list">
-                <div class="empty-state">No trades yet...</div>
+
+            <!-- Recent Trades -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>📊 Recent Trades</h2>
+                </div>
+
+                <div class="trades-list" id="trades-list">
+                    <div class="empty-state">No trades yet...</div>
+                </div>
             </div>
-        </div>
-        
+
         </div><!-- End Overview Tab -->
-        
+
         <!-- Logs Tab Content -->
         <div id="logs-tab" class="tab-content">
-        <!-- Bot Logs Viewer -->
-        <div class="section">
-            <div class="section-header">
-                <h2>📜 Bot Logs</h2>
-                <button class="btn btn-sm" onclick="refreshLogs()">🔄 Refresh</button>
+            <!-- Bot Logs Viewer -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>📜 Bot Logs</h2>
+                    <button class="btn btn-sm" onclick="refreshLogs()">🔄 Refresh</button>
+                </div>
+
+                <!-- Log Filters -->
+                <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                    <select id="log-bot-filter" onchange="refreshLogs()"
+                        style="padding: 8px; background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 5px; color: white;">
+                        <option value="">All Bots</option>
+                    </select>
+
+                    <select id="log-type-filter" onchange="refreshLogs()"
+                        style="padding: 8px; background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 5px; color: white;">
+                        <option value="">All Types</option>
+                        <option value="buy">🟢 Buys</option>
+                        <option value="sell">🔴 Sells</option>
+                        <option value="signal">📊 Signals</option>
+                        <option value="error">❌ Errors</option>
+                        <option value="hold">⏸️ Holds</option>
+                        <option value="info">ℹ️ Info</option>
+                    </select>
+
+                    <input type="text" id="log-search" placeholder="Search logs..." onkeyup="refreshLogs()"
+                        style="flex: 1; min-width: 200px; padding: 8px; background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 5px; color: white;">
+
+                    <button class="btn btn-sm" onclick="clearLogFilters()">Clear Filters</button>
+                </div>
+
+                <!-- Logs Display -->
+                <div id="logs-container"
+                    style="max-height: 600px; overflow-y: auto; background: #0f0f1e; padding: 15px; border-radius: 5px; font-family: 'Courier New', monospace; font-size: 0.85em;">
+                    <div style="color: #888; text-align: center;">Loading logs...</div>
+                </div>
             </div>
-            
-            <!-- Log Filters -->
-            <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
-                <select id="log-bot-filter" onchange="refreshLogs()" style="padding: 8px; background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 5px; color: white;">
-                    <option value="">All Bots</option>
-                </select>
-                
-                <select id="log-type-filter" onchange="refreshLogs()" style="padding: 8px; background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 5px; color: white;">
-                    <option value="">All Types</option>
-                    <option value="buy">🟢 Buys</option>
-                    <option value="sell">🔴 Sells</option>
-                    <option value="signal">📊 Signals</option>
-                    <option value="error">❌ Errors</option>
-                    <option value="hold">⏸️ Holds</option>
-                    <option value="info">ℹ️ Info</option>
-                </select>
-                
-                <input type="text" id="log-search" placeholder="Search logs..." onkeyup="refreshLogs()" style="flex: 1; min-width: 200px; padding: 8px; background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 5px; color: white;">
-                
-                <button class="btn btn-sm" onclick="clearLogFilters()">Clear Filters</button>
-            </div>
-            
-            <!-- Logs Display -->
-            <div id="logs-container" style="max-height: 600px; overflow-y: auto; background: #0f0f1e; padding: 15px; border-radius: 5px; font-family: 'Courier New', monospace; font-size: 0.85em;">
-                <div style="color: #888; text-align: center;">Loading logs...</div>
-            </div>
-        </div>
         </div><!-- End Logs Tab -->
-        
+
         <!-- System Tab Content -->
         <div id="system-tab" class="tab-content">
             <!-- Git Status Section -->
@@ -595,66 +774,73 @@
                     <h2>📦 Git Repository Status</h2>
                     <button class="btn btn-sm" onclick="refreshGitStatus()">🔄 Refresh</button>
                 </div>
-                
+
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
                     <div class="summary-card">
                         <h3>🌿 Current Branch</h3>
                         <div class="value" style="font-size: 1.3em;" id="git-branch">Loading...</div>
                     </div>
-                    
+
                     <div class="summary-card">
                         <h3>📊 Status</h3>
                         <div class="value" style="font-size: 1.3em;" id="git-status">Loading...</div>
                     </div>
-                    
+
                     <div class="summary-card">
                         <h3>📝 Latest Commit</h3>
                         <div style="font-size: 0.9em; color: #888; margin-top: 10px;" id="git-commit">Loading...</div>
                     </div>
-                    
+
                     <div class="summary-card">
                         <h3>🔄 Remote Status</h3>
                         <div class="value" style="font-size: 1.3em;" id="git-remote">Loading...</div>
                     </div>
                 </div>
-                
+
                 <!-- Detailed Info -->
                 <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-top: 20px;">
                     <h3 style="margin-top: 0;">📋 Detailed Information</h3>
-                    <div id="git-details" style="font-family: 'Courier New', monospace; font-size: 0.9em; line-height: 1.8;">
+                    <div id="git-details"
+                        style="font-family: 'Courier New', monospace; font-size: 0.9em; line-height: 1.8;">
                         Loading git information...
                     </div>
                 </div>
-                
+
                 <!-- Update Actions -->
-                <div style="background: #1e1e2e; padding: 20px; border-radius: 8px; margin-top: 20px; border: 1px solid #2a2a3e;">
+                <div
+                    style="background: #1e1e2e; padding: 20px; border-radius: 8px; margin-top: 20px; border: 1px solid #2a2a3e;">
                     <h3 style="margin-top: 0;">🚀 Update Actions</h3>
                     <div style="display: flex; gap: 15px; flex-wrap: wrap;">
-                        <button class="btn" style="background: #4caf50;" onclick="pullUpdates()">⬇️ Pull Latest Changes</button>
-                        <button class="btn" style="background: #ff9800;" onclick="restartDashboard()">🔄 Restart Dashboard</button>
+                        <button class="btn" style="background: #4caf50;" onclick="pullUpdates()">⬇️ Pull Latest
+                            Changes</button>
+                        <button class="btn" style="background: #ff9800;" onclick="restartDashboard()">🔄 Restart
+                            Dashboard</button>
                         <button class="btn btn-secondary" onclick="viewUpdateLog()">📜 View Update Log</button>
                     </div>
-                    <div id="update-status" style="margin-top: 15px; padding: 10px; background: #0d0d17; border-radius: 5px; font-family: 'Courier New', monospace; font-size: 0.85em; display: none;"></div>
+                    <div id="update-status"
+                        style="margin-top: 15px; padding: 10px; background: #0d0d17; border-radius: 5px; font-family: 'Courier New', monospace; font-size: 0.85em; display: none;">
+                    </div>
                 </div>
             </div>
-            
+
             <!-- Server Info Section -->
             <div class="section">
                 <div class="section-header">
                     <h2>🖥️ Server Information</h2>
                 </div>
-                
+
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
                     <div class="summary-card">
                         <h3>💻 Python Version</h3>
                         <div class="value" style="font-size: 1.1em;" id="python-version">Loading...</div>
                     </div>
-                    
+
                     <div class="summary-card">
                         <h3>📂 Working Directory</h3>
-                        <div style="font-size: 0.85em; color: #888; margin-top: 10px; word-break: break-all;" id="working-dir">Loading...</div>
+                        <div style="font-size: 0.85em; color: #888; margin-top: 10px; word-break: break-all;"
+                            id="working-dir">Loading...</div>
                     </div>
-                    
+
                     <div class="summary-card">
                         <h3>⏱️ Dashboard Uptime</h3>
                         <div class="value" style="font-size: 1.1em;" id="dashboard-uptime">Loading...</div>
@@ -663,17 +849,17 @@
             </div>
         </div><!-- End System Tab -->
     </div>
-    
+
     <!-- Add Bot Modal -->
     <div class="modal" id="add-bot-modal">
         <div class="modal-content">
             <h2>➕ Add New Trading Bot</h2>
-            
+
             <div class="form-group">
                 <label>Bot Name</label>
                 <input type="text" id="bot-name" placeholder="e.g. BTC Momentum Bot">
             </div>
-            
+
             <div class="form-group">
                 <label>Strategy</label>
                 <select id="bot-strategy" onchange="updateSymbolHelp()">
@@ -688,16 +874,17 @@
                     <option value="volatile">Volatile Coins</option>
                 </select>
             </div>
-            
+
             <!-- Symbol input (for most strategies) -->
             <div class="form-group" id="symbol-input-group">
                 <label>Trading Symbol <span id="symbol-help" style="color: #888; font-size: 0.85em;"></span></label>
                 <input type="text" id="bot-symbol" placeholder="e.g. BTCUSDT" value="BTCUSDT">
             </div>
-            
+
             <!-- Ticker dropdown (for ticker_news strategy) -->
             <div class="form-group" id="ticker-select-group" style="display: none;">
-                <label>Select Ticker <span style="color: #667eea;">📰 News will be fetched for this ticker</span></label>
+                <label>Select Ticker <span style="color: #667eea;">📰 News will be fetched for this
+                        ticker</span></label>
                 <select id="bot-ticker">
                     <option value="BTC">BTC - Bitcoin</option>
                     <option value="ETH">ETH - Ethereum</option>
@@ -714,35 +901,36 @@
                     📰 Bot will fetch news for this ticker every hour and trade based on AI analysis
                 </div>
             </div>
-            
+
             <div class="form-group">
-                <label>Allocated Capital (USDT) <span style="color: #888; font-size: 0.85em;">- Total USDT to give this bot</span></label>
+                <label>Allocated Capital (USDT) <span style="color: #888; font-size: 0.85em;">- Total USDT to give this
+                        bot</span></label>
                 <input type="number" id="bot-amount" placeholder="200" value="200">
                 <div style="color: #888; font-size: 0.8em; margin-top: 5px;">
                     💡 This is the total USDT pool this bot will manage and trade with.<br>
                     Example: $200 = Bot gets $200 USDT to use for all its trades.
                 </div>
             </div>
-            
+
             <div class="form-actions">
                 <button class="btn btn-secondary" onclick="hideAddBotModal()">Cancel</button>
                 <button class="btn" onclick="addBot()">Create Bot</button>
             </div>
         </div>
     </div>
-    
+
     <!-- Edit Bot Modal -->
     <div class="modal" id="edit-bot-modal">
         <div class="modal-content">
             <h2>✏️ Edit Bot Settings</h2>
-            
+
             <input type="hidden" id="edit-bot-id">
-            
+
             <div class="form-group">
                 <label>Bot Name</label>
                 <input type="text" id="edit-bot-name">
             </div>
-            
+
             <div class="form-group">
                 <label>Allocated Capital (USDT)</label>
                 <input type="number" id="edit-bot-amount">
@@ -750,131 +938,131 @@
                     Total USDT this bot manages
                 </div>
             </div>
-            
+
             <div class="form-actions">
                 <button class="btn btn-secondary" onclick="hideEditBotModal()">Cancel</button>
                 <button class="btn" onclick="saveBot()">Save Changes</button>
             </div>
         </div>
     </div>
-    
+
     <!-- Coin Details Modal -->
     <div class="modal" id="coin-details-modal">
         <div class="modal-content" style="max-width: 800px;">
             <h2 id="coin-modal-title">💎 Coin Details</h2>
-            
+
             <div id="coin-modal-body">
                 <!-- Dynamic content loaded here -->
                 <div style="text-align: center; padding: 40px; color: #888;">
                     Loading coin details...
                 </div>
             </div>
-            
+
             <div class="form-actions" style="margin-top: 20px;">
                 <button class="btn btn-secondary" onclick="hideCoinModal()">Close</button>
             </div>
         </div>
     </div>
-    
+
     <!-- Bot Details Modal -->
     <div class="modal" id="bot-details-modal">
         <div class="modal-content" style="max-width: 900px;">
             <h2 id="bot-modal-title">🤖 Bot Details</h2>
-            
+
             <div id="bot-modal-body" style="max-height: 70vh; overflow-y: auto;">
                 <!-- Dynamic content loaded here -->
                 <div style="text-align: center; padding: 40px; color: #888;">
                     Loading bot details...
                 </div>
             </div>
-            
+
             <div class="form-actions" style="margin-top: 20px;">
                 <button class="btn btn-secondary" onclick="hideBotModal()">Close</button>
             </div>
         </div>
     </div>
-    
+
     <script>
         let currentData = {};
         let dashboardStartTime = Date.now();
-        
+
         // Format date to local timezone in dd/mm/yyyy hh:mm am/pm format
         function formatDateTime(dateString) {
             if (!dateString) return 'N/A';
-            
+
             const date = new Date(dateString);
-            
+
             // Check if valid date
             if (isNaN(date.getTime())) return dateString;
-            
+
             // Get date components
             const day = String(date.getDate()).padStart(2, '0');
             const month = String(date.getMonth() + 1).padStart(2, '0');
             const year = date.getFullYear();
-            
+
             // Get time components
             let hours = date.getHours();
             const minutes = String(date.getMinutes()).padStart(2, '0');
             const ampm = hours >= 12 ? 'pm' : 'am';
-            
+
             // Convert to 12-hour format
             hours = hours % 12;
             hours = hours ? hours : 12; // 0 should be 12
             hours = String(hours).padStart(2, '0');
-            
+
             return `${day}/${month}/${year} ${hours}:${minutes} ${ampm}`;
         }
-        
+
         // Format time only (for shorter display)
         function formatTime(dateString) {
             if (!dateString) return 'N/A';
-            
+
             const date = new Date(dateString);
             if (isNaN(date.getTime())) return dateString;
-            
+
             let hours = date.getHours();
             const minutes = String(date.getMinutes()).padStart(2, '0');
             const ampm = hours >= 12 ? 'pm' : 'am';
-            
+
             hours = hours % 12;
             hours = hours ? hours : 12;
             hours = String(hours).padStart(2, '0');
-            
+
             return `${hours}:${minutes} ${ampm}`;
         }
-        
+
         // Format date only
         function formatDate(dateString) {
             if (!dateString) return 'N/A';
-            
+
             const date = new Date(dateString);
             if (isNaN(date.getTime())) return dateString;
-            
+
             const day = String(date.getDate()).padStart(2, '0');
             const month = String(date.getMonth() + 1).padStart(2, '0');
             const year = date.getFullYear();
-            
+
             return `${day}/${month}/${year}`;
         }
-        
+
         // Tab switching
         function switchTab(tabName) {
             // Hide all tabs
             document.querySelectorAll('.tab-content').forEach(tab => {
                 tab.classList.remove('active');
             });
-            
+
             // Remove active class from all tab buttons
             document.querySelectorAll('.tab').forEach(btn => {
                 btn.classList.remove('active');
             });
-            
+
             // Show selected tab
             document.getElementById(tabName + '-tab').classList.add('active');
-            
+
             // Add active class to clicked button
             event.target.classList.add('active');
-            
+
             // Load data for the tab if needed
             if (tabName === 'logs') {
                 refreshLogs();
@@ -883,7 +1071,7 @@
                 updateServerInfo();
             }
         }
-        
+
         // Git status functions
         function refreshGitStatus() {
             fetch('/api/git/status')
@@ -902,11 +1090,11 @@
                     console.error('Error fetching git status:', error);
                 });
         }
-        
+
         function renderGitStatus(data) {
             // Branch
             document.getElementById('git-branch').textContent = data.branch;
-            
+
             // Status
             const statusEl = document.getElementById('git-status');
             if (data.status.clean) {
@@ -914,7 +1102,7 @@
             } else {
                 statusEl.innerHTML = `<span style="color: #ff9800;">⚠️ ${data.status.changes_count} change(s)</span>`;
             }
-            
+
             // Commit
             document.getElementById('git-commit').innerHTML = `
                 <div style="margin-bottom: 5px;"><strong>${data.commit.hash}</strong></div>
@@ -923,7 +1111,7 @@
                     by ${data.commit.author} • ${data.commit.date}
                 </div>
             `;
-            
+
             // Remote status
             const remoteEl = document.getElementById('git-remote');
             if (data.remote.status === 'up-to-date') {
@@ -937,7 +1125,7 @@
             } else {
                 remoteEl.innerHTML = '<span style="color: #888;">Unknown</span>';
             }
-            
+
             // Detailed info
             let details = `<div style="color: #4caf50; margin-bottom: 10px;">✓ Git repository found</div>`;
             details += `<div><strong>Branch:</strong> ${data.branch}</div>`;
@@ -945,17 +1133,17 @@
             details += `<div><strong>Author:</strong> ${data.commit.author}</div>`;
             details += `<div><strong>Date:</strong> ${data.commit.date}</div>`;
             details += `<div><strong>Working Tree:</strong> ${data.status.clean ? 'Clean ✓' : data.status.changes_count + ' uncommitted changes ⚠️'}</div>`;
-            
+
             if (data.remote.status === 'behind') {
                 details += `<div style="color: #ff9800; margin-top: 10px;"><strong>⚠️ Your code is ${data.remote.behind} commit(s) behind origin/${data.branch}</strong></div>`;
                 details += `<div style="color: #888;">Click "Pull Latest Changes" to update</div>`;
             } else if (data.remote.status === 'up-to-date') {
                 details += `<div style="color: #4caf50; margin-top: 10px;"><strong>✓ Your code is up to date!</strong></div>`;
             }
-            
+
             document.getElementById('git-details').innerHTML = details;
         }
-        
+
         function updateServerInfo() {
             fetch('/api/git/status')
                 .then(response => response.json())
@@ -963,37 +1151,37 @@
                     if (result.success) {
                         document.getElementById('python-version').textContent = result.python_version;
                         document.getElementById('working-dir').textContent = result.working_dir;
-                        
+
                         // Calculate uptime
                         const uptime = Math.floor((Date.now() - dashboardStartTime) / 1000);
                         const hours = Math.floor(uptime / 3600);
                         const minutes = Math.floor((uptime % 3600) / 60);
                         const seconds = uptime % 60;
-                        document.getElementById('dashboard-uptime').textContent = 
+                        document.getElementById('dashboard-uptime').textContent =
                             `${hours}h ${minutes}m ${seconds}s`;
                     }
                 })
                 .catch(error => console.error('Error fetching server info:', error));
         }
-        
+
         function pullUpdates() {
             if (!confirm(`Pull latest changes from git?
 
 This will update your code to the latest version.`)) {
                 return;
             }
-            
+
             const statusEl = document.getElementById('update-status');
             statusEl.style.display = 'block';
             statusEl.innerHTML = '⏳ Pulling latest changes...';
-            
+
             // Note: This would need a new API endpoint to actually execute git pull
             // For now, just show a message
             setTimeout(() => {
                 statusEl.innerHTML = '⚠️ Manual update required. Run: git pull origin main';
             }, 1000);
         }
-        
+
         function restartDashboard() {
             if (!confirm(`Restart the dashboard now?
 
@@ -1005,7 +1193,7 @@ This will:
 Continue?`)) {
                 return;
             }
-            
+
             fetch('/api/dashboard/restart', { method: 'POST' })
                 .then(response => response.json())
                 .then(result => {
@@ -1027,13 +1215,13 @@ Continue?`)) {
                     }, 5000);
                 });
         }
-        
+
         function viewUpdateLog() {
             alert(`To view update log, run on your server:
 
 tail -f /root/tradingbot/auto_update.log`);
         }
-        
+
         // Update dashboard
         function updateDashboard() {
             fetch('/api/overview')
@@ -1047,27 +1235,27 @@ tail -f /root/tradingbot/auto_update.log`);
                         document.getElementById('mode').textContent = 'ERROR';
                         return;
                     }
-                    
+
                     currentData = result;
-                    
+
                     // Update account info
                     document.getElementById('available').textContent = '$' + result.account.usdt_available.toFixed(2);
                     document.getElementById('locked').textContent = '$' + result.account.usdt_locked.toFixed(2);
                     document.getElementById('total').textContent = '$' + result.account.total.toFixed(2);
                     document.getElementById('mode').textContent = result.account.mode;
-                    
+
                     // Show error if present
                     if (result.account.error) {
                         console.error('Account error:', result.account.error);
                         alert('API Error: ' + result.account.error + '\n\nCheck your .env file and API keys!');
                     }
-                    
+
                     // Update assets
                     renderAssets(result.account.balances || []);
-                    
+
                     // Update bots
                     renderBots(result.bots);
-                    
+
                     // Update trades
                     renderTrades(result.trades);
                 })
@@ -1078,37 +1266,37 @@ tail -f /root/tradingbot/auto_update.log`);
                     document.getElementById('total').textContent = 'Connection Error';
                 });
         }
-        
+
         // Send trading alert SMS
         function sendAlert() {
             if (confirm('Send trading summary SMS now?')) {
                 fetch('/api/send_alert', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'}
+                    headers: { 'Content-Type': 'application/json' }
                 })
-                .then(response => response.json())
-                .then(result => {
-                    if (result.success) {
-                        alert('✅ ' + result.message);
-                    } else {
-                        alert('❌ Error: ' + result.error);
-                    }
-                })
-                .catch(error => {
-                    alert('❌ Error sending alert: ' + error);
-                });
+                    .then(response => response.json())
+                    .then(result => {
+                        if (result.success) {
+                            alert('✅ ' + result.message);
+                        } else {
+                            alert('❌ Error: ' + result.error);
+                        }
+                    })
+                    .catch(error => {
+                        alert('❌ Error sending alert: ' + error);
+                    });
             }
         }
-        
+
         // Render assets
         function renderAssets(balances) {
             const list = document.getElementById('assets-list');
-            
+
             if (balances.length === 0) {
                 list.innerHTML = '<div class="empty-state">No assets found. Check API connection.</div>';
                 return;
             }
-            
+
             list.innerHTML = balances.map(bal => `
                 <div class="summary-card clickable" onclick="showCoinDetails('${bal.asset}')">
                     <h3>${bal.asset} <span style="font-size: 0.8em; color: #667eea;">🔍 Click for details</span></h3>
@@ -1119,16 +1307,16 @@ tail -f /root/tradingbot/auto_update.log`);
                 </div>
             `).join('');
         }
-        
+
         // Render bots
         function renderBots(bots) {
             const grid = document.getElementById('bots-grid');
-            
+
             if (bots.length === 0) {
                 grid.innerHTML = '<div class="empty-state">No bots yet. Add your first bot!</div>';
                 return;
             }
-            
+
             grid.innerHTML = bots.map(bot => `
                 <div class="bot-card" style="cursor: pointer;" onclick="event.stopPropagation(); if (!event.target.closest('button')) showBotDetails(${bot.id});" title="Click for full details">
                     <div class="bot-header">
@@ -1196,26 +1384,26 @@ tail -f /root/tradingbot/auto_update.log`);
                     ` : ''}
                     
                     <div class="bot-controls">
-                        ${bot.status === 'stopped' 
-                            ? `<button class="btn btn-sm btn-success" onclick="startBot(${bot.id})">▶ Start</button>`
-                            : `<button class="btn btn-sm btn-danger" onclick="stopBot(${bot.id})">⏹ Stop</button>`
-                        }
+                        ${bot.status === 'stopped'
+                    ? `<button class="btn btn-sm btn-success" onclick="startBot(${bot.id})">▶ Start</button>`
+                    : `<button class="btn btn-sm btn-danger" onclick="stopBot(${bot.id})">⏹ Stop</button>`
+                }
                         <button class="btn btn-sm btn-secondary" onclick="editBot(${bot.id})">✏️ Edit</button>
                         <button class="btn btn-sm btn-danger" onclick="deleteBot(${bot.id})">🗑️</button>
                     </div>
                 </div>
             `).join('');
         }
-        
+
         // Render trades
         function renderTrades(trades) {
             const list = document.getElementById('trades-list');
-            
+
             if (trades.length === 0) {
                 list.innerHTML = '<div class="empty-state">No trades yet...</div>';
                 return;
             }
-            
+
             list.innerHTML = trades.map(trade => {
                 // Try to format trade time if it's a valid date
                 let formattedTime = trade.time;
@@ -1227,7 +1415,7 @@ tail -f /root/tradingbot/auto_update.log`);
                 } catch (e) {
                     // If parsing fails, keep original
                 }
-                
+
                 return `
                     <div class="trade-item">
                         <div class="trade-time">${formattedTime}</div>
@@ -1236,14 +1424,14 @@ tail -f /root/tradingbot/auto_update.log`);
                 `;
             }).reverse().join('');
         }
-        
+
         // Update symbol help text based on strategy
         function updateSymbolHelp() {
             const strategy = document.getElementById('bot-strategy').value;
             const helpText = document.getElementById('symbol-help');
             const symbolInputGroup = document.getElementById('symbol-input-group');
             const tickerSelectGroup = document.getElementById('ticker-select-group');
-            
+
             // Show/hide appropriate input based on strategy
             if (strategy === 'ticker_news') {
                 // Show ticker dropdown for news-driven strategy
@@ -1253,7 +1441,7 @@ tail -f /root/tradingbot/auto_update.log`);
                 // Show symbol input for all other strategies
                 symbolInputGroup.style.display = 'block';
                 tickerSelectGroup.style.display = 'none';
-                
+
                 // Update help text
                 if (strategy === 'ai_autonomous') {
                     helpText.textContent = '(ignored - AI picks the coin!)';
@@ -1266,7 +1454,7 @@ tail -f /root/tradingbot/auto_update.log`);
                 }
             }
         }
-        
+
         // Show/hide modals
         function showAddBotModal() {
             try {
@@ -1284,21 +1472,21 @@ tail -f /root/tradingbot/auto_update.log`);
                 alert('Error opening modal: ' + error.message);
             }
         }
-        
+
         function hideAddBotModal() {
             document.getElementById('add-bot-modal').style.display = 'none';
         }
-        
+
         function hideEditBotModal() {
             document.getElementById('edit-bot-modal').style.display = 'none';
         }
-        
+
         // Show/hide add funds modal
         // Add bot
         function addBot() {
             const strategy = document.getElementById('bot-strategy').value;
             let symbol;
-            
+
             // For ticker_news strategy, use ticker dropdown
             if (strategy === 'ticker_news') {
                 const ticker = document.getElementById('bot-ticker').value;
@@ -1306,83 +1494,83 @@ tail -f /root/tradingbot/auto_update.log`);
             } else {
                 symbol = document.getElementById('bot-symbol').value.toUpperCase();
             }
-            
+
             const data = {
                 name: document.getElementById('bot-name').value,
                 symbol: symbol,
                 strategy: strategy,
                 trade_amount: parseFloat(document.getElementById('bot-amount').value)
             };
-            
+
             if (!data.name || !data.symbol || !data.trade_amount) {
                 alert('Please fill all fields');
                 return;
             }
-            
+
             fetch('/api/bot/add', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             })
-            .then(response => response.json())
-            .then(result => {
-                if (result.success) {
-                    hideAddBotModal();
-                    updateDashboard();
-                    
-                    // Clear form
-                    document.getElementById('bot-name').value = '';
-                    document.getElementById('bot-symbol').value = 'BTCUSDT';
-                    document.getElementById('bot-ticker').value = 'BTC';
-                    document.getElementById('bot-amount').value = '200';
-                    document.getElementById('bot-strategy').value = 'ticker_news';
-                    updateSymbolHelp(); // Reset to default view
-                } else {
-                    alert('Error: ' + result.error);
-                }
-            });
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        hideAddBotModal();
+                        updateDashboard();
+
+                        // Clear form
+                        document.getElementById('bot-name').value = '';
+                        document.getElementById('bot-symbol').value = 'BTCUSDT';
+                        document.getElementById('bot-ticker').value = 'BTC';
+                        document.getElementById('bot-amount').value = '200';
+                        document.getElementById('bot-strategy').value = 'ticker_news';
+                        updateSymbolHelp(); // Reset to default view
+                    } else {
+                        alert('Error: ' + result.error);
+                    }
+                });
         }
-        
+
         // Edit bot
         function editBot(botId) {
             const bot = currentData.bots.find(b => b.id === botId);
             if (!bot) return;
-            
+
             document.getElementById('edit-bot-id').value = botId;
             document.getElementById('edit-bot-name').value = bot.name;
             document.getElementById('edit-bot-amount').value = bot.trade_amount;
-            
+
             document.getElementById('edit-bot-modal').style.display = 'flex';
         }
-        
+
         function saveBot() {
             const botId = parseInt(document.getElementById('edit-bot-id').value);
             const data = {
                 name: document.getElementById('edit-bot-name').value,
                 trade_amount: parseFloat(document.getElementById('edit-bot-amount').value)
             };
-            
+
             fetch(`/api/bot/${botId}/update`, {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             })
-            .then(response => response.json())
-            .then(result => {
-                if (result.success) {
-                    hideEditBotModal();
-                    updateDashboard();
-                } else {
-                    alert('Error: ' + result.error);
-                }
-            });
+                .then(response => response.json())
+                .then(result => {
+                    if (result.success) {
+                        hideEditBotModal();
+                        updateDashboard();
+                    } else {
+                        alert('Error: ' + result.error);
+                    }
+                });
         }
-        
+
         // Start/Stop bot
         function startBot(botId) {
             if (!confirm('Start this bot?\n\nThis will begin LIVE TRADING with real orders!')) return;
-            
-            fetch(`/api/bot/${botId}/start`, {method: 'POST'})
+
+            fetch(`/api/bot/${botId}/start`, { method: 'POST' })
                 .then(response => response.json())
                 .then(result => {
                     if (result.success) {
@@ -1393,11 +1581,11 @@ tail -f /root/tradingbot/auto_update.log`);
                     }
                 });
         }
-        
+
         function stopBot(botId) {
             if (!confirm('Stop this bot?\n\nThis will halt all trading immediately.')) return;
-            
-            fetch(`/api/bot/${botId}/stop`, {method: 'POST'})
+
+            fetch(`/api/bot/${botId}/stop`, { method: 'POST' })
                 .then(response => response.json())
                 .then(result => {
                     if (result.success) {
@@ -1408,12 +1596,12 @@ tail -f /root/tradingbot/auto_update.log`);
                     }
                 });
         }
-        
+
         // Delete bot
         function deleteBot(botId) {
             if (!confirm('Delete this bot? This cannot be undone.')) return;
-            
-            fetch(`/api/bot/${botId}/delete`, {method: 'POST'})
+
+            fetch(`/api/bot/${botId}/delete`, { method: 'POST' })
                 .then(response => response.json())
                 .then(result => {
                     if (result.success) {
@@ -1423,7 +1611,7 @@ tail -f /root/tradingbot/auto_update.log`);
                     }
                 });
         }
-        
+
         // Show/hide coin details modal
         function showCoinDetails(symbol) {
             document.getElementById('coin-details-modal').style.display = 'flex';
@@ -1434,7 +1622,7 @@ tail -f /root/tradingbot/auto_update.log`);
                     Loading ${symbol} details...
                 </div>
             `;
-            
+
             // Fetch coin details
             fetch(`/api/coin/${symbol}`)
                 .then(response => response.json())
@@ -1457,11 +1645,11 @@ tail -f /root/tradingbot/auto_update.log`);
                     `;
                 });
         }
-        
+
         function hideCoinModal() {
             document.getElementById('coin-details-modal').style.display = 'none';
         }
-        
+
         // Bot Details Modal Functions
         function showBotDetails(botId) {
             document.getElementById('bot-details-modal').style.display = 'flex';
@@ -1472,7 +1660,7 @@ tail -f /root/tradingbot/auto_update.log`);
                     Loading bot details...
                 </div>
             `;
-            
+
             // Fetch bot details
             fetch(`/api/bot/${botId}/details`)
                 .then(response => response.json())
@@ -1495,18 +1683,18 @@ tail -f /root/tradingbot/auto_update.log`);
                     `;
                 });
         }
-        
+
         function hideBotModal() {
             document.getElementById('bot-details-modal').style.display = 'none';
         }
-        
+
         function renderBotDetails(data) {
             const modalBody = document.getElementById('bot-modal-body');
             const bot = data.bot;
             const investment = data.investment;
             const profitPct = investment.total_investment > 0 ? ((bot.profit / investment.total_investment) * 100) : 0;
             const profitColor = bot.profit >= 0 ? '#4caf50' : '#f44336';
-            
+
             modalBody.innerHTML = `
                 <!-- Bot Summary -->
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
@@ -1648,10 +1836,10 @@ tail -f /root/tradingbot/auto_update.log`);
                         <h3 style="margin: 0 0 15px 0;">📜 Trade History (Last 20)</h3>
                         <div style="max-height: 300px; overflow-y: auto;">
                             ${data.trade_history.map(trade => {
-                                const isBuy = trade.action === 'BUY';
-                                const color = isBuy ? '#4caf50' : '#f44336';
-                                const icon = isBuy ? '🟢' : '🔴';
-                                return `
+                const isBuy = trade.action === 'BUY';
+                const color = isBuy ? '#4caf50' : '#f44336';
+                const icon = isBuy ? '🟢' : '🔴';
+                return `
                                     <div style="background: #16161f; padding: 12px; border-radius: 6px; margin-bottom: 8px; border-left: 3px solid ${color};">
                                         <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
                                             <span style="color: ${color}; font-weight: bold;">${icon} ${trade.action}</span>
@@ -1660,7 +1848,7 @@ tail -f /root/tradingbot/auto_update.log`);
                                         <div style="color: #ccc; font-size: 0.9em;">${trade.details}</div>
                                     </div>
                                 `;
-                            }).reverse().join('')}
+            }).reverse().join('')}
                         </div>
                     </div>
                 ` : `
@@ -1688,10 +1876,10 @@ tail -f /root/tradingbot/auto_update.log`);
                 `}
             `;
         }
-        
+
         function renderCoinDetails(data) {
             const modalBody = document.getElementById('coin-modal-body');
-            
+
             // Calculate P&L if there's a position
             let pnlHtml = '';
             if (data.position_details && data.position_details.length > 0) {
@@ -1700,7 +1888,7 @@ tail -f /root/tradingbot/auto_update.log`);
                 const entryPrice = pos.entry_price || 0;
                 const pnl = ((currentPrice - entryPrice) / entryPrice * 100).toFixed(2);
                 const pnlColor = pnl >= 0 ? '#4caf50' : '#f44336';
-                
+
                 pnlHtml = `
                     <div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-top: 15px; border: 1px solid ${pnl >= 0 ? '#4caf50' : '#f44336'};">
                         <h4 style="margin: 0 0 10px 0;">📊 Position P&L</h4>
@@ -1713,7 +1901,7 @@ tail -f /root/tradingbot/auto_update.log`);
                     </div>
                 `;
             }
-            
+
             modalBody.innerHTML = `
                 <!-- Balance Summary -->
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px;">
@@ -1819,54 +2007,54 @@ tail -f /root/tradingbot/auto_update.log`);
                 `}
             `;
         }
-        
+
         // Close modal on outside click
-        window.onclick = function(event) {
+        window.onclick = function (event) {
             if (event.target.classList.contains('modal')) {
                 event.target.style.display = 'none';
             }
         }
-        
+
         // Logs functionality
         function refreshLogs() {
             const botFilter = document.getElementById('log-bot-filter').value;
             const typeFilter = document.getElementById('log-type-filter').value;
             const searchFilter = document.getElementById('log-search').value;
-            
+
             let url = '/api/logs?limit=200';
             if (botFilter) url += `&bot_id=${botFilter}`;
             if (typeFilter) url += `&type=${typeFilter}`;
             if (searchFilter) url += `&search=${encodeURIComponent(searchFilter)}`;
-            
+
             fetch(url)
                 .then(response => response.json())
                 .then(result => {
                     if (!result.success) {
-                        document.getElementById('logs-container').innerHTML = 
+                        document.getElementById('logs-container').innerHTML =
                             '<div style="color: #f44336;">Error loading logs</div>';
                         return;
                     }
-                    
+
                     const logsContainer = document.getElementById('logs-container');
-                    
+
                     if (result.logs.length === 0) {
                         logsContainer.innerHTML = '<div style="color: #888; text-align: center;">No logs found</div>';
                         return;
                     }
-                    
+
                     // Update bot filter dropdown
                     const botIds = [...new Set(result.logs.map(log => log.bot_id))];
                     const currentBotFilter = document.getElementById('log-bot-filter').value;
-                    const botFilterHtml = '<option value="">All Bots</option>' + 
+                    const botFilterHtml = '<option value="">All Bots</option>' +
                         botIds.map(id => `<option value="${id}" ${id === currentBotFilter ? 'selected' : ''}>Bot ${id}</option>`).join('');
                     document.getElementById('log-bot-filter').innerHTML = botFilterHtml;
-                    
+
                     // Render logs
                     logsContainer.innerHTML = result.logs.map(log => {
                         let color = '#fff';
                         let icon = '';
-                        
-                        switch(log.type) {
+
+                        switch (log.type) {
                             case 'buy': color = '#4caf50'; icon = '🟢'; break;
                             case 'sell': color = '#f44336'; icon = '🔴'; break;
                             case 'signal': color = '#2196f3'; icon = '📊'; break;
@@ -1874,7 +2062,7 @@ tail -f /root/tradingbot/auto_update.log`);
                             case 'hold': color = '#888'; icon = '⏸️'; break;
                             default: color = '#aaa'; icon = 'ℹ️';
                         }
-                        
+
                         return `
                             <div style="margin-bottom: 8px; padding: 8px; background: #1a1a2e; border-radius: 4px; border-left: 3px solid ${color};">
                                 <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
@@ -1888,18 +2076,18 @@ tail -f /root/tradingbot/auto_update.log`);
                 })
                 .catch(error => {
                     console.error('Error fetching logs:', error);
-                    document.getElementById('logs-container').innerHTML = 
+                    document.getElementById('logs-container').innerHTML =
                         '<div style="color: #f44336;">Connection error</div>';
                 });
         }
-        
+
         function clearLogFilters() {
             document.getElementById('log-bot-filter').value = '';
             document.getElementById('log-type-filter').value = '';
             document.getElementById('log-search').value = '';
             refreshLogs();
         }
-        
+
         // Sentiment Analysis Dashboard
         function refreshSentiment() {
             fetch('/api/sentiment')
@@ -1909,7 +2097,7 @@ tail -f /root/tradingbot/auto_update.log`);
                         console.error('Sentiment error:', result.error);
                         return;
                     }
-                    
+
                     // Update sentiment summary
                     const summary = result.sentiment_summary;
                     document.getElementById('sentiment-positive').textContent = summary.Positive_pct ? summary.Positive_pct + '%' : '0%';
@@ -1919,10 +2107,10 @@ tail -f /root/tradingbot/auto_update.log`);
                     document.getElementById('sentiment-neutral').textContent = summary.Neutral_pct ? summary.Neutral_pct + '%' : '0%';
                     document.getElementById('sentiment-neutral-count').textContent = summary.Neutral + ' articles';
                     document.getElementById('sentiment-total').textContent = summary.total;
-                    
+
                     // Render recommendations
                     renderRecommendations(result.recommendations || []);
-                    
+
                     // Render recent analyses
                     renderAnalyses(result.recent_analyses || []);
                 })
@@ -1930,20 +2118,20 @@ tail -f /root/tradingbot/auto_update.log`);
                     console.error('Error fetching sentiment:', error);
                 });
         }
-        
+
         function renderRecommendations(recommendations) {
             const list = document.getElementById('recommendations-list');
-            
+
             if (recommendations.length === 0) {
                 list.innerHTML = '<div class="empty-state">No recommendations yet...</div>';
                 return;
             }
-            
+
             list.innerHTML = recommendations.map(rec => {
                 const time = formatDateTime(rec.timestamp);
                 const signalColor = rec.signal === 'BUY' ? '#4caf50' : '#f44336';
                 const sentimentEmoji = rec.sentiment === 'Positive' ? '🟢' : (rec.sentiment === 'Negative' ? '🔴' : '⚪');
-                
+
                 return `
                     <div style="background: #2a2a2a; padding: 12px; border-radius: 6px; margin-bottom: 10px; border-left: 3px solid ${signalColor};">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
@@ -1959,20 +2147,20 @@ tail -f /root/tradingbot/auto_update.log`);
                 `;
             }).join('');
         }
-        
+
         function renderAnalyses(analyses) {
             const list = document.getElementById('analyses-list');
-            
+
             if (analyses.length === 0) {
                 list.innerHTML = '<div class="empty-state">No analyses yet...</div>';
                 return;
             }
-            
+
             list.innerHTML = analyses.map(analysis => {
                 const time = formatDateTime(analysis.timestamp);
                 const signalColor = analysis.signal === 'BUY' ? '#4caf50' : (analysis.signal === 'SELL' ? '#f44336' : '#888');
                 const sentimentColor = analysis.sentiment === 'Positive' ? '#4caf50' : (analysis.sentiment === 'Negative' ? '#f44336' : '#888');
-                
+
                 return `
                     <div style="background: #2a2a2a; padding: 10px; border-radius: 6px; margin-bottom: 8px; font-size: 0.9em;">
                         <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
@@ -1989,21 +2177,22 @@ tail -f /root/tradingbot/auto_update.log`);
                 `;
             }).join('');
         }
-        
+
         // Initial update
         updateDashboard();
         refreshLogs();
         refreshSentiment();
-        
+
         // Auto-refresh every 5 seconds
         setInterval(updateDashboard, 5000);
         setInterval(refreshLogs, 10000); // Refresh logs every 10 seconds
         setInterval(refreshSentiment, 30000); // Refresh sentiment every 30 seconds
         setInterval(updateServerInfo, 1000); // Update uptime every second
-        
+
         // Verify dashboard loaded
         console.log('✅ Dashboard JavaScript loaded successfully');
         console.log('✅ Modal functions available:', typeof showAddBotModal === 'function');
     </script>
 </body>
+
 </html>

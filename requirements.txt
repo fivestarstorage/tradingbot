@@ -17,12 +17,23 @@ requests>=2.31.0
 # Additional dependencies for compatibility
 urllib3>=1.26.0,<2.0.0
 
-# Web Dashboard (optional)
-flask>=2.3.0
+# Web API / Dashboard
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+jinja2>=3.1.2
+itsdangerous>=2.2.0
 
-# AI News Trading (optional)
-openai>=1.0.0
+# AI / Tools
+openai>=1.40.0
 feedparser>=6.0.0
+
+# Background scheduling
+apscheduler>=3.10.4
+
+# ORM & DB
+sqlalchemy>=2.0.21
+alembic>=1.12.0
+sqlite-utils>=3.36
 
 # SMS Notifications (optional)
 twilio>=8.0.0
