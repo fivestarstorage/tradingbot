@@ -184,6 +184,83 @@ def api_sentiment(db: Session = Depends(get_db)):
     }
 
 
+@app.get('/api/portfolio')
+def api_portfolio(db: Session = Depends(get_db)):
+    # Enumerate balances and compute USDT value per asset
+    items = []
+    total_usdt_value = 0.0
+    try:
+        acct = binance.client.get_account()
+        balances = acct.get('balances', [])
+        for b in balances:
+            asset = b.get('asset')
+            free = float(b.get('free', 0))
+            locked = float(b.get('locked', 0))
+            total = free + locked
+            if total <= 0:
+                continue
+            if asset == 'USDT':
+                value = total
+            else:
+                symbol = f"{asset}USDT"
+                try:
+                    price = binance.get_current_price(symbol)
+                    value = (price or 0) * total
+                except Exception:
+                    value = 0.0
+            total_usdt_value += value
+            items.append({
+                'asset': asset,
+                'free': free,
+                'locked': locked,
+                'total': total,
+                'usdt_value': value
+            })
+        items.sort(key=lambda x: x['usdt_value'], reverse=True)
+    except Exception:
+        pass
+    return {'total_usdt': total_usdt_value, 'holdings': items}
+
+
+@app.get('/api/trades')
+def api_trades(limit: int = 50, db: Session = Depends(get_db)):
+    trs = db.query(Trade).order_by(Trade.created_at.desc()).limit(limit).all()
+    return [
+        {
+            'symbol': t.symbol,
+            'side': t.side,
+            'quantity': t.quantity,
+            'price': t.price,
+            'notional': t.notional,
+            'created_at': t.created_at.isoformat(),
+        } for t in trs
+    ]
+
+
+@app.get('/api/insights')
+def api_insights(db: Session = Depends(get_db)):
+    # Basic insights: counts, top symbols, hourly signal counts (last 24h)
+    total_signals = db.query(func.count(Signal.id)).scalar() or 0
+    # top symbols by signals
+    sym_counts = db.query(Signal.symbol, func.count(Signal.id)).group_by(Signal.symbol).order_by(func.count(Signal.id).desc()).limit(5).all()
+    top_symbols = [[s, c] for s, c in sym_counts]
+    # hourly signals for last 24h
+    import datetime
+    now = datetime.datetime.utcnow()
+    since = now - datetime.timedelta(hours=24)
+    recent = db.query(Signal).filter(Signal.created_at >= since).all()
+    by_hour = {}
+    for s in recent:
+        ts = s.created_at.replace(minute=0, second=0, microsecond=0)
+        by_hour[ts] = by_hour.get(ts, 0) + 1
+    hours = [since.replace(minute=0, second=0, microsecond=0) + datetime.timedelta(hours=i) for i in range(25)]
+    series = [{'t': h.isoformat() + 'Z', 'count': by_hour.get(h, 0)} for h in hours]
+    # trade counts
+    buys = db.query(func.count(Trade.id)).filter(Trade.side == 'BUY').scalar() or 0
+    sells = db.query(func.count(Trade.id)).filter(Trade.side == 'SELL').scalar() or 0
+    return {'signals_total': total_signals, 'top_symbols': top_symbols, 'signals_hourly': series, 'trades': {'buys': buys, 'sells': sells}}
+
+
 @app.get('/api/git/status')
 def api_git_status():
     # Stub: not wired to system git; return static OK to avoid 404 noise
