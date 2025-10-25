@@ -994,3 +994,103 @@ def api_momentum_status():
     }
 
 
+# ==================== LOGS ENDPOINTS ====================
+
+@app.get('/api/logs')
+def api_logs(
+    level: str = None,
+    category: str = None,
+    limit: int = 200,
+    db: Session = Depends(get_db)
+):
+    """Get bot logs with filtering"""
+    query = db.query(BotLog)
+    
+    if level:
+        query = query.filter(BotLog.level == level.upper())
+    
+    if category:
+        query = query.filter(BotLog.category == category.upper())
+    
+    logs = query.order_by(BotLog.created_at.desc()).limit(limit).all()
+    
+    return [{
+        'id': log.id,
+        'level': log.level,
+        'category': log.category,
+        'message': log.message,
+        'created_at': log.created_at.isoformat() if log.created_at else None,
+    } for log in logs]
+
+
+@app.get('/api/logs/stats')
+def api_logs_stats(db: Session = Depends(get_db)):
+    """Get logs statistics"""
+    from datetime import timedelta
+    from sqlalchemy import func
+    
+    now = datetime.datetime.utcnow()
+    last_hour = now - timedelta(hours=1)
+    last_24h = now - timedelta(hours=24)
+    
+    # Total logs
+    total = db.query(func.count(BotLog.id)).scalar() or 0
+    
+    # Last hour
+    last_hour_count = db.query(func.count(BotLog.id)).filter(
+        BotLog.created_at >= last_hour
+    ).scalar() or 0
+    
+    # By level (last 24h)
+    errors_24h = db.query(func.count(BotLog.id)).filter(
+        BotLog.level == 'ERROR',
+        BotLog.created_at >= last_24h
+    ).scalar() or 0
+    
+    warnings_24h = db.query(func.count(BotLog.id)).filter(
+        BotLog.level == 'WARNING',
+        BotLog.created_at >= last_24h
+    ).scalar() or 0
+    
+    info_24h = db.query(func.count(BotLog.id)).filter(
+        BotLog.level == 'INFO',
+        BotLog.created_at >= last_24h
+    ).scalar() or 0
+    
+    # By category
+    categories = db.query(
+        BotLog.category,
+        func.count(BotLog.id).label('count')
+    ).filter(
+        BotLog.created_at >= last_24h
+    ).group_by(BotLog.category).all()
+    
+    return {
+        'total': total,
+        'last_hour': last_hour_count,
+        'last_24h': {
+            'errors': errors_24h,
+            'warnings': warnings_24h,
+            'info': info_24h,
+        },
+        'categories': [{'category': c[0], 'count': c[1]} for c in categories]
+    }
+
+
+@app.delete('/api/logs/clear')
+def api_logs_clear(older_than_days: int = 7, db: Session = Depends(get_db)):
+    """Clear old logs"""
+    from datetime import timedelta
+    
+    cutoff = datetime.datetime.utcnow() - timedelta(days=older_than_days)
+    
+    deleted = db.query(BotLog).filter(BotLog.created_at < cutoff).delete()
+    db.commit()
+    
+    return {
+        'ok': True,
+        'deleted': deleted,
+        'message': f'Cleared logs older than {older_than_days} days'
+    }
+
+
