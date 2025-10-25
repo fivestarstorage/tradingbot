@@ -8,6 +8,7 @@ from sqlalchemy import func
 from apscheduler.schedulers.background import BackgroundScheduler
 from .db import Base, engine, get_db
 from .models import NewsArticle, Signal, Position, Trade, SchedulerRun
+from datetime import timezone
 from .news_service import fetch_and_store_news
 from .ai_decider import AIDecider
 from .trading_service import TradingService
@@ -92,8 +93,15 @@ def api_news(db: Session = Depends(get_db)):
             'url': n.news_url,
             'sentiment': n.sentiment,
             'tickers': n.tickers,
-            'date': n.date.isoformat() if n.date else None,
-            'ingested_at': n.created_at.isoformat() if n.created_at else None
+            # normalize to explicit UTC (Z) so frontend can convert to local tz reliably
+            'date': (
+                (n.date.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z'))
+                if n.date else None
+            ),
+            'ingested_at': (
+                (n.created_at.replace(tzinfo=timezone.utc).isoformat().replace('+00:00', 'Z'))
+                if n.created_at else None
+            )
         } for n in items
     ]
 
