@@ -1,37 +1,28 @@
-SSH & Start Dashboard
-=====================
+#!/bin/bash
 
-# 1. SSH into your server
-ssh root@134.199.159.103
+# Manually restart the TradingBot v2 backend (FastAPI/uvicorn) via systemd
+# Usage: ./START
 
-# 2. Navigate to the bot directory
-cd tradingbot
+set -euo pipefail
 
-# 3. AUTO-DETECT & START BOTS FOR ALL WALLET COINS ($25 each)
-python3 auto_manager.py
+SERVICE="tradingbot"
 
-# 4. Start the dashboard (run in background)
-screen -dmS dashboard python3 simple_dash.py
+echo "=================================================="
+echo "🔄 Restarting $SERVICE"
+echo "=================================================="
 
-# 5. Verify it's running
-screen -ls
+# Ensure service is enabled to survive reboots (idempotent)
+sudo systemctl enable "$SERVICE" >/dev/null 2>&1 || true
 
-# Done! Access from browser:
-http://134.199.159.103:5001
+# Restart service
+sudo systemctl restart "$SERVICE"
 
----
+echo
+echo "✅ Status:"
+sudo systemctl status "$SERVICE" --no-pager -l || true
 
-View dashboard output:
-screen -r dashboard
-# Press Ctrl+A then D to detach
-
-Stop dashboard:
-screen -S dashboard -X quit
+echo
+echo "📜 Live logs (Ctrl+C to exit)"
+sudo journalctl -u "$SERVICE" -f
 
 
-
-
---------------------------------
-new start script 
-uvicorn app.server:app --host 0.0.0.0 --port 8000
---------------------------------

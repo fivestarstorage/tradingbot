@@ -15,6 +15,7 @@ from .trending_service import compute_trending
 from .chat_service import ChatService
 from core.binance_client import BinanceClient
 import subprocess
+from typing import Optional, Dict, Any
 
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), '..', 'templates'))
 
@@ -47,6 +48,22 @@ binance = BinanceClient(
 trade_service = TradingService(binance)
 ai_decider = AIDecider()
 chat_service = ChatService(binance, trade_service)
+
+# Runtime overrides for simple config tweaks via API
+RUNTIME_OVERRIDES: Dict[str, Any] = {
+    'AUTO_TRADE': None,  # bool
+    'WATCHLIST': None,   # list[str]
+}
+
+def get_bool(name: str, default: bool) -> bool:
+    if RUNTIME_OVERRIDES.get(name) is not None:
+        return bool(RUNTIME_OVERRIDES[name])
+    return (os.getenv(name, 'true' if default else 'false').lower() == 'true')
+
+def get_watchlist() -> list:
+    if RUNTIME_OVERRIDES.get('WATCHLIST'):
+        return [s.strip().upper() for s in RUNTIME_OVERRIDES['WATCHLIST'] if s.strip()]
+    return [s.strip().upper() for s in os.getenv('WATCHLIST', 'BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT').split(',')]
 
 
 @app.get('/', response_class=HTMLResponse)
@@ -150,7 +167,8 @@ def api_runs(limit: int = 20, db: Session = Depends(get_db)):
     rows = db.query(SchedulerRun).order_by(SchedulerRun.started_at.desc()).limit(limit).all()
     return [
         {
-            'started_at': r.started_at.isoformat() if r.started_at else None,
+            # mark as UTC explicitly so frontend can convert to local tz
+            'started_at': (r.started_at.isoformat() + 'Z') if r.started_at else None,
             'inserted': r.inserted, 'skipped': r.skipped, 'total': r.total,
             'positive': r.positive, 'negative': r.negative, 'neutral': r.neutral,
             'signals': r.signals, 'buys': r.buys, 'sells': r.sells,
@@ -275,6 +293,26 @@ def api_health():
         return {'ok': True, 'binance': True}
     except Exception:
         return {'ok': True, 'binance': False}
+
+
+@app.get('/api/price')
+def api_price(symbol: str):
+    symbol = symbol.upper()
+    price = binance.get_current_price(symbol)
+    return {'symbol': symbol, 'price': price}
+
+
+@app.get('/api/open_orders')
+def api_open_orders(symbol: Optional[str] = None):
+    sym = symbol.upper() if symbol else None
+    orders = binance.client.get_open_orders(symbol=sym)
+    return orders
+
+
+@app.post('/api/orders/cancel')
+def api_cancel_order(symbol: str, order_id: int):
+    res = binance.cancel_order(symbol.upper(), order_id)
+    return {'ok': bool(res), 'result': res}
 
 
 @app.get('/favicon.ico')
