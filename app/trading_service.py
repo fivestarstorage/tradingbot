@@ -1,7 +1,10 @@
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from core.binance_client import BinanceClient
 from .models import Trade, Position
+from decimal import Decimal, ROUND_DOWN, getcontext
+
+getcontext().prec = 28
 
 
 class TradingService:
@@ -31,18 +34,32 @@ class TradingService:
         price = self.client.get_current_price(symbol)
         if not price or price <= 0:
             return None
-        quantity = usdt_amount / price
-        quantity = float(quantity)
-        quantity = self._format_quantity(symbol, quantity)
+        # Apply exchange filters (LOT_SIZE, MIN_NOTIONAL)
+        step_size, min_qty, min_notional = self._get_symbol_filters(symbol)
+        raw_qty = Decimal(str(usdt_amount)) / Decimal(str(price))
+        quantity = self._floor_to_step(raw_qty, step_size)
+        # Ensure >= min_qty
+        if quantity < min_qty:
+            # Not enough to meet minimum quantity
+            return None
+        # Ensure notional >= min_notional
+        notional = quantity * Decimal(str(price))
+        if min_notional and notional < min_notional:
+            # Try increasing by one step if within budget, else fail
+            alt_qty = self._floor_to_step((Decimal(str(min_notional)) / Decimal(str(price))), step_size)
+            if alt_qty * Decimal(str(price)) <= Decimal(str(usdt_amount)) and alt_qty >= min_qty:
+                quantity = alt_qty
+            else:
+                return None
         order = self.client.place_market_order(symbol, 'BUY', quantity)
         if not order:
             return None
         trade = Trade(
             symbol=symbol,
             side='BUY',
-            quantity=quantity,
-            price=price,
-            notional=price * quantity,
+            quantity=float(quantity),
+            price=float(price),
+            notional=float(Decimal(str(price)) * quantity),
             binance_order_id=str(order.get('orderId')),
             status=order.get('status', 'FILLED'),
             meta=order
@@ -61,19 +78,25 @@ class TradingService:
         return trade
 
     def sell_market(self, db: Session, symbol: str, quantity: float) -> Optional[Trade]:
-        quantity = self._format_quantity(symbol, float(quantity))
         price = self.client.get_current_price(symbol)
         if not price or price <= 0:
             return None
-        order = self.client.place_market_order(symbol, 'SELL', quantity)
+        step_size, min_qty, min_notional = self._get_symbol_filters(symbol)
+        qty_dec = Decimal(str(quantity))
+        qty_dec = self._floor_to_step(qty_dec, step_size)
+        if qty_dec < min_qty:
+            return None
+        if min_notional and (qty_dec * Decimal(str(price)) < min_notional):
+            return None
+        order = self.client.place_market_order(symbol, 'SELL', float(qty_dec))
         if not order:
             return None
         trade = Trade(
             symbol=symbol,
             side='SELL',
-            quantity=quantity,
-            price=price,
-            notional=price * quantity,
+            quantity=float(qty_dec),
+            price=float(price),
+            notional=float(Decimal(str(price)) * qty_dec),
             binance_order_id=str(order.get('orderId')),
             status=order.get('status', 'FILLED'),
             meta=order
@@ -87,10 +110,29 @@ class TradingService:
         db.commit()
         return trade
 
-    def _format_quantity(self, symbol: str, quantity: float) -> float:
+    def _get_symbol_filters(self, symbol: str) -> Tuple[Decimal, Decimal, Optional[Decimal]]:
+        """Return (step_size, min_qty, min_notional) as Decimals."""
         try:
-            return float(f"{quantity:.6f}")
+            info = self.client.client.get_symbol_info(symbol)
+            step = Decimal('0.000001')
+            minq = Decimal('0')
+            minnot = None
+            for f in info.get('filters', []):
+                if f.get('filterType') == 'LOT_SIZE':
+                    step = Decimal(str(f.get('stepSize', '0.000001')))
+                    minq = Decimal(str(f.get('minQty', '0')))
+                if f.get('filterType') in ('MIN_NOTIONAL','NOTIONAL'):
+                    mn = f.get('minNotional') or f.get('notional')
+                    if mn is not None:
+                        minnot = Decimal(str(mn))
+            return (step, minq, minnot)
         except Exception:
-            return quantity
+            return (Decimal('0.000001'), Decimal('0'), None)
+
+    def _floor_to_step(self, value: Decimal, step: Decimal) -> Decimal:
+        if step <= 0:
+            return value.quantize(Decimal('0.000001'), rounding=ROUND_DOWN)
+        steps = (value / step).to_integral_value(rounding=ROUND_DOWN)
+        return steps * step
 
 
