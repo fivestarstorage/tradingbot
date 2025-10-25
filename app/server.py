@@ -597,7 +597,7 @@ Format:
             response = openai.chat.completions.create(
                 model='gpt-4o-mini',
                 messages=[
-                    {"role": "system", "content": "You are a concise crypto market analyst."},
+                    {"role": "system", "content": "You are a concise crypto market analyst. Always respond with valid JSON."},
                     {"role": "user", "content": insight_prompt}
                 ],
                 response_format={"type": "json_object"},

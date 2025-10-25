@@ -2,7 +2,12 @@
 
 ## ✅ What's New
 
-Your trading bot now automatically scrapes crypto news from **CoinDesk** in addition to the existing Crypto News API!
+Your trading bot now automatically scrapes crypto news from **CoinDesk** with **AI-powered analysis**:
+
+- 🧠 **AI Sentiment Analysis** - GPT-4o-mini determines if news is Positive/Negative/Neutral
+- 🏷️ **Automatic Ticker Extraction** - AI identifies mentioned cryptocurrencies (BTC, ETH, XRP, etc.)
+- 📅 **Real Timestamps** - Extracts actual publication dates (not "5 minutes ago")
+- 📰 **Full Article Content** - Reads complete articles for better analysis
 
 ## 🚀 How to Use
 
@@ -45,12 +50,12 @@ Or visit the API endpoint in your browser: http://localhost:8001/api/fetch-news
 
 Articles from CoinDesk will appear in your news feed with:
 - ✅ Professional headlines from CoinDesk.com
-- ✅ Article summaries/descriptions
-- ✅ Featured images
-- ✅ Publication time (e.g., "5 minutes ago")
+- ✅ Full article content (first 500 chars)
+- ✅ Featured images from Open Graph
+- ✅ **Actual publication timestamps** (UTC datetime)
 - ✅ Source labeled as "CoinDesk"
-- ⚠️ No sentiment score (N/A)
-- ⚠️ No ticker tags
+- ✅ **AI-determined sentiment** (Positive/Negative/Neutral)
+- ✅ **AI-extracted ticker tags** (BTC, ETH, XRP, etc.)
 
 ### Combined Feed
 

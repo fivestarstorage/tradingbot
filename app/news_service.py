@@ -1,8 +1,11 @@
 import os
+import re
+import json
 import requests
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from bs4 import BeautifulSoup
+from openai import OpenAI
 from .models import NewsArticle
 
 CRYPTO_NEWS_URL = os.getenv(
@@ -29,9 +32,125 @@ def parse_date(date_str: str):
             return None
 
 
+def extract_article_content(article_url: str, headers: dict):
+    """
+    Fetches and extracts content from a single CoinDesk article.
+    Returns (content, published_date, image_url) or (None, None, None) on failure.
+    """
+    try:
+        resp = requests.get(article_url, headers=headers, timeout=20)
+        resp.raise_for_status()
+        
+        soup = BeautifulSoup(resp.content, 'lxml')
+        
+        # Extract article content
+        content = ''
+        
+        # Try to find article body - CoinDesk typically uses article tag or specific divs
+        article_body = soup.find('article') or soup.find('div', class_=lambda x: x and 'article' in str(x).lower())
+        
+        if article_body:
+            # Get all paragraph tags
+            paragraphs = article_body.find_all('p')
+            content = ' '.join([p.get_text(strip=True) for p in paragraphs if p.get_text(strip=True)])
+        
+        # If no content found, try a more general approach
+        if not content:
+            paragraphs = soup.find_all('p')
+            # Filter out navigation/footer paragraphs
+            content = ' '.join([p.get_text(strip=True) for p in paragraphs[:20] if len(p.get_text(strip=True)) > 50])
+        
+        # Extract published date/time from JSON-LD structured data
+        published_date = None
+        try:
+            # Find JSON-LD script tag
+            json_ld_script = soup.find('script', type='application/ld+json')
+            if json_ld_script and json_ld_script.string:
+                data = json.loads(json_ld_script.string)
+                # Extract datePublished or dateModified
+                date_str = data.get('datePublished') or data.get('dateModified')
+                if date_str:
+                    # Parse ISO format datetime
+                    published_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                    # Convert to UTC and make naive
+                    published_date = published_date.astimezone(timezone.utc).replace(tzinfo=None)
+        except Exception as e:
+            # Fallback: try time tag
+            try:
+                time_tag = soup.find('time', {'datetime': True})
+                if time_tag:
+                    date_str = time_tag.get('datetime')
+                    if date_str:
+                        published_date = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                        published_date = published_date.astimezone(timezone.utc).replace(tzinfo=None)
+            except:
+                pass
+        
+        # Extract image
+        image_url = ''
+        og_image = soup.find('meta', property='og:image')
+        if og_image:
+            image_url = og_image.get('content', '')
+        
+        return content[:3000], published_date, image_url  # Limit content to 3000 chars for AI analysis
+        
+    except Exception as e:
+        print(f"Error extracting article content from {article_url}: {e}")
+        return None, None, None
+
+
+def analyze_article_with_ai(title: str, content: str):
+    """
+    Uses OpenAI to analyze article sentiment and extract crypto tickers.
+    Returns (sentiment, tickers_list) or (None, []) on failure.
+    """
+    try:
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            return None, []
+        
+        client = OpenAI(api_key=api_key)
+        
+        prompt = f"""Analyze this crypto news article and extract information in JSON format.
+
+Title: {title}
+
+Content: {content[:2000]}
+
+Provide:
+1. sentiment: "Positive", "Negative", or "Neutral"
+2. tickers: List of cryptocurrency symbols mentioned (e.g., ["BTC", "ETH", "XRP"])
+
+Respond with valid JSON in this format:
+{{
+  "sentiment": "Positive",
+  "tickers": ["BTC", "ETH"]
+}}"""
+
+        response = client.chat.completions.create(
+            model='gpt-4o-mini',
+            messages=[
+                {"role": "system", "content": "You are a crypto news analyst. Always respond with valid JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.3
+        )
+        
+        result = json.loads(response.choices[0].message.content)
+        sentiment = result.get('sentiment', 'Neutral')
+        tickers = result.get('tickers', [])
+        
+        return sentiment, tickers
+        
+    except Exception as e:
+        print(f"Error analyzing article with AI: {e}")
+        return None, []
+
+
 def scrape_coindesk_news():
     """
-    Scrapes latest crypto news from CoinDesk.
+    Scrapes latest crypto news from CoinDesk with full article analysis.
     Returns a list of article dictionaries.
     """
     try:
@@ -47,7 +166,12 @@ def scrape_coindesk_news():
         # CoinDesk uses links with class 'content-card-title' for article titles
         article_links = soup.find_all('a', class_='content-card-title')
         
-        for link_elem in article_links:
+        # Limit to first 10 articles to avoid too many API calls
+        article_links = article_links[:10]
+        
+        print(f"Found {len(article_links)} CoinDesk articles to process...")
+        
+        for idx, link_elem in enumerate(article_links, 1):
             try:
                 # Extract article URL
                 article_url = link_elem.get('href', '')
@@ -63,62 +187,39 @@ def scrape_coindesk_news():
                 if not title:
                     continue
                 
-                # Find the parent container to get associated metadata
-                parent = link_elem.find_parent('div', class_='flex flex-col')
+                print(f"  [{idx}/{len(article_links)}] Processing: {title[:60]}...")
                 
-                description = ''
-                date_str = None
-                image_url = ''
+                # Fetch full article content
+                content, published_date, image_url = extract_article_content(article_url, headers)
                 
-                if parent:
-                    # Extract description - look for p tag with specific classes
-                    desc_elem = parent.find('p', class_=lambda x: x and 'font-body' in x)
-                    if desc_elem:
-                        description = desc_elem.get_text(strip=True)
-                    
-                    # Extract time - look for span with metadata class
-                    time_elem = parent.find('span', class_=lambda x: x and 'font-metadata' in x)
-                    if time_elem:
-                        date_str = time_elem.get_text(strip=True)
-                    
-                    # Try to find image in the parent's parent (sibling structure)
-                    grandparent = parent.find_parent('div')
-                    if grandparent:
-                        img_elem = grandparent.find('img', class_=lambda x: x and 'content-card-image' in x)
-                        if img_elem:
-                            # Try various image source attributes
-                            image_url = img_elem.get('src', '') or img_elem.get('data-src', '')
-                            # Handle Next.js image URLs
-                            if image_url and '/_next/image?url=' in image_url:
-                                # Extract the actual image URL from Next.js wrapper
-                                try:
-                                    import urllib.parse
-                                    parsed = urllib.parse.parse_qs(urllib.parse.urlparse(image_url).query)
-                                    if 'url' in parsed:
-                                        image_url = parsed['url'][0]
-                                except:
-                                    pass
+                if not content:
+                    print(f"    ⚠️  Could not extract content, skipping")
+                    continue
+                
+                # Analyze with AI
+                sentiment, tickers = analyze_article_with_ai(title, content)
                 
                 # Build article dictionary
                 article_data = {
                     'news_url': article_url,
                     'title': title,
-                    'text': description,
+                    'text': content[:500],  # Store first 500 chars as description
                     'image_url': image_url,
                     'source_name': 'CoinDesk',
-                    'date': date_str,  # This will be relative time like "5 minutes ago"
+                    'date': published_date,  # Proper datetime object
                     'type': 'Article',
-                    'sentiment': None,  # We don't have sentiment from scraping
-                    'tickers': []  # Could potentially extract from title/text later
+                    'sentiment': sentiment,
+                    'tickers': tickers
                 }
                 
                 articles.append(article_data)
+                print(f"    ✓ Sentiment: {sentiment}, Tickers: {', '.join(tickers) if tickers else 'None'}")
                 
             except Exception as e:
-                print(f"Error parsing CoinDesk article: {e}")
+                print(f"  ✗ Error processing article: {e}")
                 continue
         
-        print(f"Scraped {len(articles)} articles from CoinDesk")
+        print(f"✓ Scraped {len(articles)} CoinDesk articles with AI analysis")
         return articles
         
     except Exception as e:

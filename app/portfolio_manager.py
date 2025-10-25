@@ -183,7 +183,7 @@ Trading philosophy:
             response = openai.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are a prudent crypto portfolio manager focused on risk management."},
+                    {"role": "system", "content": "You are a prudent crypto portfolio manager focused on risk management. Always respond with valid JSON."},
                     {"role": "user", "content": prompt}
                 ],
                 response_format={"type": "json_object"},
