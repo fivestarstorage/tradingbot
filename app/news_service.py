@@ -14,6 +14,7 @@ CRYPTO_NEWS_URL = os.getenv(
 )
 
 COINDESK_NEWS_URL = 'https://www.coindesk.com/latest-crypto-news'
+COINTELEGRAPH_NEWS_URL = 'https://cointelegraph.com/rss'
 
 
 def parse_date(date_str: str):
@@ -227,6 +228,107 @@ def scrape_coindesk_news():
         return []
 
 
+def scrape_cointelegraph_rss():
+    """
+    Fetches latest crypto news from CoinTelegraph RSS feed.
+    Returns a list of article dictionaries.
+    """
+    try:
+        import xml.etree.ElementTree as ET
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        resp = requests.get(COINTELEGRAPH_NEWS_URL, headers=headers, timeout=20)
+        resp.raise_for_status()
+        
+        # Parse RSS XML
+        root = ET.fromstring(resp.content)
+        articles = []
+        
+        # Find all items in the RSS feed
+        items = root.findall('.//item')[:10]  # Limit to 10 most recent
+        
+        print(f"Found {len(items)} CoinTelegraph articles to process...")
+        
+        for idx, item in enumerate(items, 1):
+            try:
+                # Extract RSS fields
+                title_elem = item.find('title')
+                link_elem = item.find('link')
+                desc_elem = item.find('description')
+                pub_date_elem = item.find('pubDate')
+                
+                title = title_elem.text if title_elem is not None else ''
+                article_url = link_elem.text if link_elem is not None else ''
+                description = desc_elem.text if desc_elem is not None else ''
+                pub_date_str = pub_date_elem.text if pub_date_elem is not None else ''
+                
+                if not title or not article_url:
+                    continue
+                
+                # Clean HTML from description
+                desc_soup = BeautifulSoup(description, 'html.parser')
+                clean_desc = desc_soup.get_text(strip=True)
+                
+                print(f"  [{idx}/{len(items)}] Processing: {title[:60]}...")
+                
+                # Parse date from RSS first
+                published_date = None
+                if pub_date_str:
+                    try:
+                        # RSS date format: "Fri, 25 Oct 2025 12:00:00 GMT"
+                        published_date = datetime.strptime(pub_date_str, '%a, %d %b %Y %H:%M:%S %Z')
+                    except:
+                        try:
+                            # Alternative format with timezone offset
+                            published_date = datetime.strptime(pub_date_str, '%a, %d %b %Y %H:%M:%S %z')
+                            published_date = published_date.replace(tzinfo=None)
+                        except:
+                            pass
+                
+                # Fetch full article content for better analysis
+                full_content, article_pub_date, image_url = extract_article_content(article_url, headers)
+                
+                # Use article's published date if found, otherwise use RSS date
+                if article_pub_date:
+                    published_date = article_pub_date
+                
+                if not full_content:
+                    print(f"    ⚠️  Could not extract full content, using RSS description")
+                    full_content = clean_desc
+                
+                # Analyze with AI using full content
+                sentiment, tickers = analyze_article_with_ai(title, full_content)
+                
+                # Build article dictionary
+                article_data = {
+                    'news_url': article_url,
+                    'title': title,
+                    'text': full_content[:500],  # First 500 chars of full content
+                    'image_url': image_url,  # Image from article
+                    'source_name': 'CoinTelegraph',
+                    'date': published_date or datetime.utcnow(),
+                    'type': 'Article',
+                    'sentiment': sentiment,
+                    'tickers': tickers
+                }
+                
+                articles.append(article_data)
+                print(f"    ✓ Sentiment: {sentiment}, Tickers: {', '.join(tickers) if tickers else 'None'}")
+                
+            except Exception as e:
+                print(f"  ✗ Error processing article: {e}")
+                continue
+        
+        print(f"✓ Scraped {len(articles)} CoinTelegraph articles with AI analysis")
+        return articles
+        
+    except Exception as e:
+        print(f"Error scraping CoinTelegraph RSS: {e}")
+        return []
+
+
 def fetch_and_store_news(db: Session, api_key: str):
     # Fetch from crypto news API
     params = { 'token': api_key }
@@ -239,6 +341,11 @@ def fetch_and_store_news(db: Session, api_key: str):
     # Also fetch from CoinDesk
     coindesk_items = scrape_coindesk_news()
     items.extend(coindesk_items)
+    
+    # Also fetch from CoinTelegraph RSS
+    cointelegraph_items = scrape_cointelegraph_rss()
+    items.extend(cointelegraph_items)
+    
     inserted = 0
     skipped = 0
     updated = 0

@@ -276,6 +276,13 @@ def api_trades(limit: int = 50, db: Session = Depends(get_db)):
 def api_insights(db: Session = Depends(get_db)):
     # Basic insights: counts, top symbols, hourly signal counts (last 24h)
     total_signals = db.query(func.count(Signal.id)).scalar() or 0
+    
+    # Debug: Check if OpenAI key is configured
+    has_openai_key = bool(os.getenv('OPENAI_API_KEY'))
+    
+    # Debug: Check recent news count
+    total_news = db.query(func.count(NewsArticle.id)).scalar() or 0
+    
     # top symbols by signals
     sym_counts = db.query(Signal.symbol, func.count(Signal.id)).group_by(Signal.symbol).order_by(func.count(Signal.id).desc()).limit(5).all()
     top_symbols = [[s, c] for s, c in sym_counts]
@@ -293,7 +300,18 @@ def api_insights(db: Session = Depends(get_db)):
     # trade counts
     buys = db.query(func.count(Trade.id)).filter(Trade.side == 'BUY').scalar() or 0
     sells = db.query(func.count(Trade.id)).filter(Trade.side == 'SELL').scalar() or 0
-    return {'signals_total': total_signals, 'top_symbols': top_symbols, 'signals_hourly': series, 'trades': {'buys': buys, 'sells': sells}}
+    
+    return {
+        'signals_total': total_signals, 
+        'top_symbols': top_symbols, 
+        'signals_hourly': series, 
+        'trades': {'buys': buys, 'sells': sells},
+        'debug': {
+            'has_openai_key': has_openai_key,
+            'total_news_articles': total_news,
+            'watchlist': os.getenv('WATCHLIST', 'BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT')
+        }
+    }
 
 
 @app.get('/api/ai/summary')
