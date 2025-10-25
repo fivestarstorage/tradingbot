@@ -64,7 +64,7 @@ class PortfolioManager:
         """Calculate comprehensive technical indicators for a symbol"""
         try:
             # Get candles (5m, 50 periods = 4 hours of data)
-            candles = self.client.get_klines(symbol, '5m', limit=50)
+            candles = self.get_recent_candles(symbol, interval='5m', limit=50)
             if not candles or len(candles) < 20:
                 return None
             
@@ -449,7 +449,7 @@ Trading philosophy:
                     'title': n.title,
                     'sentiment': n.sentiment,
                     'date': n.date.isoformat() if n.date else n.created_at.isoformat(),
-                    'source': n.source
+                    'source': n.source_name or 'Unknown'
                 } for n in news_articles[:10]]
             },
             'candles': [{
