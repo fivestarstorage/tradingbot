@@ -624,7 +624,7 @@ Format:
             
             if sms_notifier.client:
                 # Get recent news articles from this run
-                recent_news = db.query(NewsArticle).order_by(NewsArticle.ingested_at.desc()).limit(20).all()
+                recent_news = db.query(NewsArticle).order_by(NewsArticle.created_at.desc()).limit(20).all()
                 
                 # Extract sentiment counts
                 pos_count = sum(1 for n in recent_news if n.sentiment and 'positive' in n.sentiment.lower())
