@@ -352,33 +352,61 @@ def api_ai_insight(db: Session = Depends(get_db)):
 
 @app.get('/api/portfolio/recommendations')
 def api_portfolio_recommendations(db: Session = Depends(get_db)):
-    """Get latest portfolio management recommendations."""
-    # Get recent portfolio logs
-    logs = db.query(BotLog).filter(
-        BotLog.category == 'PORTFOLIO'
-    ).order_by(BotLog.created_at.desc()).limit(10).all()
+    """Get live portfolio with AI recommendations and technical data."""
+    from .portfolio_manager import PortfolioManager
     
-    recommendations = []
-    for log in logs:
-        # Parse the log message
-        # Format: "Portfolio: SYMBOL - ACTION (confidence%) - reasoning"
-        try:
-            parts = log.message.split(' - ')
-            if len(parts) >= 3:
-                symbol_part = parts[0].replace('Portfolio: ', '')
-                action_part = parts[1]
-                reasoning = parts[2]
+    try:
+        portfolio_mgr = PortfolioManager(binance)
+        holdings = portfolio_mgr.get_portfolio_holdings()
+        
+        if not holdings:
+            return []
+        
+        recommendations = []
+        for holding in holdings:
+            # Get AI analysis for this holding
+            analysis = portfolio_mgr.analyze_holding(db, holding)
+            
+            # Get latest candle data
+            candles = portfolio_mgr.get_recent_candles(holding['symbol'], interval='5m', limit=50)
+            
+            # Calculate technical indicators
+            tech_data = {}
+            if candles:
+                prices = [c['close'] for c in candles]
+                current_price = candles[-1]['close']
+                sma_20 = sum(prices[-20:]) / 20 if len(prices) >= 20 else current_price
+                sma_50 = sum(prices[-50:]) / 50 if len(prices) >= 50 else current_price
+                price_change_5m = ((current_price - candles[-2]['close']) / candles[-2]['close'] * 100) if len(candles) >= 2 else 0
+                price_change_1h = ((current_price - candles[0]['close']) / candles[0]['close'] * 100) if len(candles) >= 12 else 0
                 
-                recommendations.append({
-                    'symbol': symbol_part,
-                    'action': action_part.split('(')[0].strip(),
-                    'reasoning': reasoning,
-                    'timestamp': log.created_at.isoformat()
-                })
-        except:
-            continue
-    
-    return recommendations
+                tech_data = {
+                    'current_price': current_price,
+                    'sma_20': sma_20,
+                    'sma_50': sma_50,
+                    'price_change_5m': price_change_5m,
+                    'price_change_1h': price_change_1h,
+                    'price_trend': 'up' if current_price > sma_20 else 'down'
+                }
+            
+            recommendations.append({
+                'symbol': analysis.get('symbol'),
+                'asset': holding['asset'],
+                'action': analysis.get('action', 'HOLD'),
+                'confidence': analysis.get('confidence', 0),
+                'reasoning': analysis.get('reasoning', ''),
+                'quantity': holding['quantity'],
+                'free': holding['free'],
+                'locked': holding['locked'],
+                'value_usdt': analysis.get('value', 0),
+                'technical': tech_data
+            })
+        
+        return recommendations
+        
+    except Exception as e:
+        print(f"Error getting portfolio recommendations: {e}")
+        return []
 
 
 @app.get('/api/git/status')
