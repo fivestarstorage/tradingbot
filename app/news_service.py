@@ -30,6 +30,7 @@ def fetch_and_store_news(db: Session, api_key: str):
     items = payload.get('data', [])
     inserted = 0
     skipped = 0
+    updated = 0
 
     for item in items:
         news_url = item.get('news_url')
@@ -61,7 +62,7 @@ def fetch_and_store_news(db: Session, api_key: str):
                 changed = True
             if changed:
                 db.add(existing)
-                inserted += 0
+                updated += 1
             else:
                 skipped += 1
             continue
@@ -81,9 +82,9 @@ def fetch_and_store_news(db: Session, api_key: str):
         db.add(art)
         inserted += 1
 
-    if inserted:
+    if inserted or updated:
         db.commit()
 
-    return { 'inserted': inserted, 'skipped': skipped, 'total': len(items) }
+    return { 'inserted': inserted, 'updated': updated, 'skipped': skipped, 'total': len(items) }
 
 

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from apscheduler.schedulers.background import BackgroundScheduler
 from .db import Base, engine, get_db
-from .models import NewsArticle, Signal, Position, Trade, SchedulerRun
+from .models import NewsArticle, Signal, Position, Trade, SchedulerRun, BotLog
 from datetime import timezone
 from .news_service import fetch_and_store_news
 from .ai_decider import AIDecider
@@ -154,6 +154,7 @@ def api_overview(db: Session = Depends(get_db)):
 def api_logs(limit: int = Query(200, ge=1, le=1000), db: Session = Depends(get_db)):
     sigs = db.query(Signal).order_by(Signal.created_at.desc()).limit(limit).all()
     trs = db.query(Trade).order_by(Trade.created_at.desc()).limit(limit).all()
+    bl = db.query(BotLog).order_by(BotLog.created_at.desc()).limit(limit).all()
     sig_entries = [{
         'type': 'signal',
         'created_at': s.created_at.isoformat(),
@@ -164,8 +165,13 @@ def api_logs(limit: int = Query(200, ge=1, le=1000), db: Session = Depends(get_d
         'created_at': t.created_at.isoformat(),
         'message': f"{t.side} {t.symbol} qty={t.quantity:.6f} @ {t.price:.4f} (${t.notional:.2f})"
     } for t in trs]
+    ai_entries = [{
+        'type': l.category.lower(),
+        'created_at': l.created_at.isoformat(),
+        'message': l.message
+    } for l in bl]
     # Merge and sort by time desc
-    merged = sig_entries + tr_entries
+    merged = sig_entries + tr_entries + ai_entries
     merged.sort(key=lambda x: x['created_at'], reverse=True)
     return merged[:limit]
 
@@ -426,11 +432,19 @@ def scheduled_job():
         if api_key:
             stats = fetch_and_store_news(db, api_key)
             run.inserted = stats.get('inserted', 0)
+            run.notes = f"updated={stats.get('updated',0)}"
             run.skipped = stats.get('skipped', 0)
             run.total = stats.get('total', 0)
         # decide on a default watchlist
         symbols = [s.strip().upper() for s in os.getenv('WATCHLIST', 'BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT').split(',')]
         signals = ai_decider.decide(db, symbols)
+        # log AI decisions
+        for s in signals:
+            try:
+                msg = f"AI: {s.symbol} {s.action} ({s.confidence}%)"
+                db.add(BotLog(level='INFO', category='AI', message=msg))
+            except Exception:
+                pass
         run.signals = len(signals)
         # quick sentiment snapshot
         total = db.query(func.count(NewsArticle.id)).scalar() or 0
@@ -453,6 +467,10 @@ def scheduled_job():
                     if check['has_funds'] and check['is_tradeable'] and check['symbol_ok']:
                         trade_service.buy_market(db, s.symbol, per_trade_usdt)
                         run.buys += 1
+                        try:
+                            db.add(BotLog(level='INFO', category='TRADE', message=f"BUY {s.symbol} ${per_trade_usdt}"))
+                        except Exception:
+                            pass
                 elif s.action == 'SELL':
                     # sell full available asset (simple policy)
                     asset = s.symbol.replace('USDT', '')
@@ -461,6 +479,10 @@ def scheduled_job():
                     if qty > 0:
                         trade_service.sell_market(db, s.symbol, qty)
                         run.sells += 1
+                        try:
+                            db.add(BotLog(level='INFO', category='TRADE', message=f"SELL {s.symbol} qty={qty}"))
+                        except Exception:
+                            pass
         db.add(run)
         db.commit()
     finally:

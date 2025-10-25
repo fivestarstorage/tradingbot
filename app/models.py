@@ -37,6 +37,15 @@ class Signal(Base):
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
+class BotLog(Base):
+    __tablename__ = 'bot_logs'
+    id = Column(Integer, primary_key=True)
+    level = Column(String(16), default='INFO', index=True)
+    category = Column(String(32), index=True)  # e.g., NEWS, AI, TRADE
+    message = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class Position(Base):
     __tablename__ = 'positions'
     id = Column(Integer, primary_key=True)
