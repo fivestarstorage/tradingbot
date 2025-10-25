@@ -778,8 +778,74 @@ Format:
         db.close()
 
 
+def momentum_scanner_job():
+    """
+    Continuous momentum scanner - runs every minute to detect rapid price movements
+    """
+    from .db import SessionLocal
+    
+    # Check if momentum trading is enabled
+    config_file = '/tmp/momentum_config.json'
+    try:
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+            if not config.get('enabled', False):
+                return  # Bot is disabled, skip scan
+    except:
+        return  # No config, skip
+    
+    db = SessionLocal()
+    try:
+        from .momentum_service import MomentumTradingService
+        momentum_service = MomentumTradingService(binance)
+        
+        # Scan for new signals
+        signals = momentum_service.scan_for_signals(db)
+        
+        if signals:
+            print(f"[Momentum] Found {len(signals)} new signals")
+            for s in signals:
+                db.add(BotLog(
+                    level='INFO',
+                    category='MOMENTUM',
+                    message=f"Signal: {s.symbol} +{s.price_change_pct:.2f}% (AI: {s.ai_confidence:.0%})"
+                ))
+        
+        # Check open trades for exit conditions
+        open_trades = db.query(MomentumTrade).filter(MomentumTrade.status == 'OPEN').all()
+        for trade in open_trades:
+            # Check if we should exit
+            ticker = binance.get_ticker(trade.symbol)
+            current_price = float(ticker['price'])
+            
+            # Calculate P&L
+            if trade.side == 'BUY':
+                pnl_pct = ((current_price - trade.entry_price) / trade.entry_price) * 100
+            else:
+                pnl_pct = ((trade.entry_price - current_price) / trade.entry_price) * 100
+            
+            # Stop loss check
+            stop_loss_pct = float(config.get('stop_loss_pct', '5'))
+            if pnl_pct <= -stop_loss_pct:
+                momentum_service._close_position(db, trade, current_price, 'STOP_LOSS')
+                db.add(BotLog(
+                    level='WARNING',
+                    category='MOMENTUM',
+                    message=f"Stop loss triggered: {trade.symbol} at {pnl_pct:.2f}%"
+                ))
+        
+        db.commit()
+    except Exception as e:
+        print(f"[Momentum] Scanner error: {e}")
+        db.add(BotLog(level='ERROR', category='MOMENTUM', message=f"Scanner error: {str(e)}"))
+        db.commit()
+    finally:
+        db.close()
+
+
 scheduler = BackgroundScheduler()
 scheduler.add_job(scheduled_job, 'interval', minutes=15, id='news_and_decision')
+scheduler.add_job(momentum_scanner_job, 'interval', minutes=1, id='momentum_scanner')  # Runs every minute
 scheduler.start()
 
 
@@ -960,11 +1026,19 @@ def api_momentum_close_trade(trade_id: int, db: Session = Depends(get_db)):
 @app.post('/api/momentum/toggle')
 def api_momentum_toggle(enabled: bool, db: Session = Depends(get_db)):
     """Enable/disable momentum trading bot"""
-    # Store state in a simple file or environment variable
-    state_file = '/tmp/momentum_bot_state.txt'
+    # Store state in a JSON file with config
+    config_file = '/tmp/momentum_config.json'
     
-    with open(state_file, 'w') as f:
-        f.write('enabled' if enabled else 'disabled')
+    try:
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+    except:
+        config = {}
+    
+    config['enabled'] = enabled
+    
+    with open(config_file, 'w') as f:
+        json.dump(config, f)
     
     return {
         'ok': True,
@@ -975,25 +1049,69 @@ def api_momentum_toggle(enabled: bool, db: Session = Depends(get_db)):
 
 @app.get('/api/momentum/status')
 def api_momentum_status():
-    """Get momentum bot status"""
-    state_file = '/tmp/momentum_bot_state.txt'
+    """Get momentum bot status and config"""
+    config_file = '/tmp/momentum_config.json'
     
     try:
-        with open(state_file, 'r') as f:
-            state = f.read().strip()
-            enabled = state == 'enabled'
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+            enabled = config.get('enabled', False)
     except:
         enabled = False
+        config = {}
     
     return {
         'enabled': enabled,
         'config': {
-            'min_price_change': os.getenv('MOMENTUM_MIN_PRICE_CHANGE', '20'),
-            'min_volume': os.getenv('MOMENTUM_MIN_VOLUME', '1000000'),
-            'ai_threshold': os.getenv('MOMENTUM_AI_THRESHOLD', '0.8'),
-            'max_position_pct': os.getenv('MOMENTUM_MAX_POSITION', '10'),
-            'stop_loss_pct': os.getenv('MOMENTUM_STOP_LOSS', '5'),
+            'min_price_change': config.get('min_price_change', os.getenv('MOMENTUM_MIN_PRICE_CHANGE', '20')),
+            'min_volume': config.get('min_volume', os.getenv('MOMENTUM_MIN_VOLUME', '1000000')),
+            'ai_threshold': config.get('ai_threshold', os.getenv('MOMENTUM_AI_THRESHOLD', '0.8')),
+            'max_position_pct': config.get('max_position_pct', os.getenv('MOMENTUM_MAX_POSITION', '10')),
+            'stop_loss_pct': config.get('stop_loss_pct', os.getenv('MOMENTUM_STOP_LOSS', '5')),
+            'check_frequency': config.get('check_frequency', '60'),  # seconds between scans
         }
+    }
+
+
+@app.post('/api/momentum/config')
+def api_momentum_update_config(
+    min_price_change: Optional[float] = None,
+    min_volume: Optional[float] = None,
+    ai_threshold: Optional[float] = None,
+    max_position_pct: Optional[float] = None,
+    stop_loss_pct: Optional[float] = None,
+    check_frequency: Optional[int] = None
+):
+    """Update momentum trading configuration"""
+    config_file = '/tmp/momentum_config.json'
+    
+    try:
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+    except:
+        config = {'enabled': False}
+    
+    # Update provided values
+    if min_price_change is not None:
+        config['min_price_change'] = str(min_price_change)
+    if min_volume is not None:
+        config['min_volume'] = str(int(min_volume))
+    if ai_threshold is not None:
+        config['ai_threshold'] = str(ai_threshold)
+    if max_position_pct is not None:
+        config['max_position_pct'] = str(max_position_pct)
+    if stop_loss_pct is not None:
+        config['stop_loss_pct'] = str(stop_loss_pct)
+    if check_frequency is not None:
+        config['check_frequency'] = str(check_frequency)
+    
+    with open(config_file, 'w') as f:
+        json.dump(config, f)
+    
+    return {
+        'ok': True,
+        'message': 'Configuration updated',
+        'config': config
     }
 
 
