@@ -2,6 +2,8 @@
 
 # Manually restart the TradingBot v2 backend (FastAPI/uvicorn) via systemd
 # Usage: ./START
+ssh root@134.199.159.103
+
 
 set -euo pipefail
 

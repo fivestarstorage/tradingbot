@@ -298,7 +298,8 @@ class BinanceClient:
                 logger.info(f"✅ {symbol} is available for trading")
                 return True
             else:
-                logger.warning(f"⚠️ {symbol} exists but not trading (status: {info.get('status')})")
+                status = info.get('status') if info else 'UNKNOWN'
+                logger.warning(f"⚠️ {symbol} not tradeable (status: {status})")
                 return False
         except BinanceAPIException as e:
             logger.warning(f"❌ {symbol} not available: {e}")

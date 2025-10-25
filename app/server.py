@@ -323,6 +323,43 @@ def api_cancel_order(symbol: str, order_id: int):
     return {'ok': bool(res), 'result': res}
 
 
+@app.get('/api/symbol/resolve')
+def api_symbol_resolve(q: str, quote: str = 'USDT'):
+    """Resolve a free-form query to a tradeable symbol on Binance.
+    Examples: q="xrp", q="buy some xrp", q="sell wal all"
+    """
+    try:
+        q_up = q.upper()
+        # candidates from tokens
+        tokens = [t for t in ''.join([c if c.isalnum() else ' ' for c in q_up]).split() if t]
+        fillers = {'BUY','SELL','IT','SOME','ALL','MY','THE','A','OF','FOR','WORTH','WITH','PLEASE','USDT'}
+        bases = [t for t in tokens if t not in fillers and not t.replace('.','',1).isdigit()]
+
+        ex = binance.client.get_exchange_info()
+        symbols = ex.get('symbols', []) if ex else []
+        # map baseAsset -> list of symbols with that base and given quote
+        tradeables = {}
+        for s in symbols:
+            if s.get('status') == 'TRADING' and s.get('quoteAsset') == quote:
+                tradeables[f"{s.get('baseAsset','')}\0{s.get('symbol','')}"] = s
+
+        # try bases in reverse (prefer last meaningful token)
+        for base in reversed(bases):
+            # direct symbol match
+            sym = f"{base}{quote}"
+            key = f"{base}\0{sym}"
+            if key in tradeables:
+                return {'symbol': sym, 'base': base, 'quote': quote, 'tradeable': True}
+        # fallback: look for exact symbol provided in text
+        for s in symbols:
+            sym = s.get('symbol')
+            if sym and sym in q_up and s.get('status') == 'TRADING':
+                return {'symbol': sym, 'base': s.get('baseAsset'), 'quote': s.get('quoteAsset'), 'tradeable': True}
+        return {'symbol': None, 'tradeable': False}
+    except Exception as e:
+        return {'symbol': None, 'tradeable': False, 'error': str(e)}
+
+
 @app.get('/favicon.ico')
 def favicon():
     # Empty 204 to silence browser requests
