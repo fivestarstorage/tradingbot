@@ -9,6 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from .db import Base, engine, get_db
 from .models import NewsArticle, Signal, Position, Trade, SchedulerRun, BotLog
 from datetime import timezone
+import datetime
 from .news_service import fetch_and_store_news
 from .ai_decider import AIDecider
 from .trading_service import TradingService
@@ -291,6 +292,33 @@ def api_insights(db: Session = Depends(get_db)):
     buys = db.query(func.count(Trade.id)).filter(Trade.side == 'BUY').scalar() or 0
     sells = db.query(func.count(Trade.id)).filter(Trade.side == 'SELL').scalar() or 0
     return {'signals_total': total_signals, 'top_symbols': top_symbols, 'signals_hourly': series, 'trades': {'buys': buys, 'sells': sells}}
+
+
+@app.get('/api/ai/summary')
+def api_ai_summary(window_minutes: int = 90, db: Session = Depends(get_db)):
+    now = datetime.datetime.utcnow()
+    since = now - datetime.timedelta(minutes=window_minutes)
+    # sentiment summary over recent window
+    recent_news = db.query(NewsArticle).filter(NewsArticle.created_at >= since).order_by(NewsArticle.created_at.desc()).limit(100).all()
+    pos = sum(1 for n in recent_news if (n.sentiment or '').lower().startswith('pos'))
+    neg = sum(1 for n in recent_news if (n.sentiment or '').lower().startswith('neg'))
+    neu = max(len(recent_news) - pos - neg, 0)
+    trending = compute_trending(db, hours=max(1, window_minutes // 60 or 1), limit=3)
+    rec = chat_service._recommend_from_news(db, {'hours': max(1, window_minutes // 60 or 1)})
+    headlines = [{ 'title': n.title, 'tickers': n.tickers, 'sentiment': n.sentiment, 'time': (n.date or n.created_at).isoformat() if (n.date or n.created_at) else None } for n in recent_news[:5]]
+    summary = f"Last {window_minutes}m: 🟢{pos} 🔴{neg} ⚪{neu}. "
+    if trending:
+        summary += f"Top: {trending[0]['ticker']} (score {trending[0]['score']}). "
+    if rec and rec.get('symbol'):
+        summary += f"Rec: {rec['action']} {rec['symbol']} ({rec.get('confidence',0)}%)."
+    return {
+        'window_minutes': window_minutes,
+        'summary': summary.strip(),
+        'sentiment': { 'positive': pos, 'negative': neg, 'neutral': neu },
+        'trending': trending,
+        'recommendation': rec,
+        'headlines': headlines
+    }
 
 
 @app.get('/api/git/status')
