@@ -307,3 +307,60 @@ class BinanceClient:
         except Exception as e:
             logger.error(f"❌ Error checking {symbol}: {e}")
             return False
+    
+    def get_24h_tickers(self):
+        """
+        Get 24-hour price change statistics for all trading pairs
+        
+        Returns:
+            list: Array of ticker data with priceChangePercent, volume, etc.
+            
+        Example:
+            tickers = client.get_24h_tickers()
+            for ticker in tickers:
+                if ticker['symbol'].endswith('USDT'):
+                    print(f"{ticker['symbol']}: {ticker['priceChangePercent']}%")
+        """
+        try:
+            # Get all tickers (no symbol parameter = all symbols)
+            # Returns array with priceChangePercent, quoteVolume, etc.
+            tickers = self.client.get_ticker()
+            return tickers
+        except BinanceAPIException as e:
+            logger.error(f"❌ Error getting 24h tickers: {e}")
+            return []
+    
+    def get_ticker(self, symbol):
+        """
+        Get 24hr ticker statistics for a specific symbol
+        
+        Args:
+            symbol (str): Trading pair (e.g., 'BTCUSDT')
+        
+        Returns:
+            dict: 24hr statistics including price change, volume, etc.
+        """
+        try:
+            ticker = self.client.get_ticker(symbol=symbol)
+            return ticker
+        except BinanceAPIException as e:
+            logger.error(f"❌ Error getting ticker for {symbol}: {e}")
+            return None
+    
+    def get_order_book(self, symbol, limit=20):
+        """
+        Get the order book (bids and asks) for a symbol
+        
+        Args:
+            symbol (str): Trading pair
+            limit (int): Number of orders to get (default 20)
+        
+        Returns:
+            dict: Order book with 'bids' and 'asks' arrays
+        """
+        try:
+            order_book = self.client.get_order_book(symbol=symbol, limit=limit)
+            return order_book
+        except BinanceAPIException as e:
+            logger.error(f"❌ Error getting order book for {symbol}: {e}")
+            return None

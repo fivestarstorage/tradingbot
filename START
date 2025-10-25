@@ -6,11 +6,8 @@ ssh root@134.199.159.103
 ---
 sudo systemctl restart tradingbot
 ---
-kill & restart
-
-pkill -f "uvicorn app.server:app"
-python3 -m uvicorn app.server:app --host 0.0.0.0 --port 8000 &
-
+watch logs
+sudo journalctl -u tradingbot -f | grep Momentum
 ----
 
 set -euo pipefail
@@ -34,5 +31,6 @@ sudo systemctl status "$SERVICE" --no-pager -l || true
 echo
 echo "📜 Live logs (Ctrl+C to exit)"
 sudo journalctl -u "$SERVICE" -f
+
 
 
