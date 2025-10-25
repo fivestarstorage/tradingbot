@@ -101,6 +101,12 @@ class MomentumTradingService:
             # Get all USDT pairs
             tickers = self.binance.get_24h_tickers()
             
+            print(f"\n[Momentum] Starting scan of {len(tickers)} pairs...")
+            print(f"[Momentum] Config: min_price={self.config['min_price_change_pct']}%, min_vol=${self.config['min_volume_24h']:,.0f}")
+            
+            checked = 0
+            volume_filtered = 0
+            
             for ticker in tickers:
                 symbol = ticker['symbol']
                 
@@ -108,19 +114,33 @@ class MomentumTradingService:
                 if not symbol.endswith('USDT'):
                     continue
                 
+                checked += 1
+                
                 # Filter: Minimum volume
                 volume_24h = float(ticker.get('quoteVolume', 0))
                 if volume_24h < self.config['min_volume_24h']:
+                    volume_filtered += 1
                     continue
+                
+                # Log coins that pass volume filter
+                price_change = float(ticker.get('priceChangePercent', 0))
+                if price_change >= self.config['min_price_change_pct']:
+                    print(f"[Momentum] 🔍 {symbol}: +{price_change:.2f}% (${volume_24h:,.0f} vol) - Analyzing...")
                 
                 # Check each interval
                 for interval in self.config['intervals']:
                     signal = self._analyze_symbol(db, symbol, interval, ticker)
                     if signal:
+                        print(f"[Momentum] ✅ SIGNAL: {symbol} +{signal.price_change_pct:.2f}% (AI: {signal.ai_confidence:.0%})")
                         signals.append(signal)
+            
+            print(f"\n[Momentum] Scan complete:")
+            print(f"  - Checked: {checked} USDT pairs")
+            print(f"  - Filtered (volume): {volume_filtered}")
+            print(f"  - Signals found: {len(signals)}")
         
         except Exception as e:
-            print(f"Error scanning for signals: {e}")
+            print(f"[Momentum] Error scanning for signals: {e}")
         
         return signals
     
@@ -130,6 +150,7 @@ class MomentumTradingService:
             # Get recent candles
             candles = self.binance.get_klines(symbol, interval, limit=50)
             if not candles or len(candles) < 20:
+                print(f"[Momentum]   ❌ {symbol}: Not enough data")
                 return None
             
             latest = candles[-1]
@@ -151,6 +172,7 @@ class MomentumTradingService:
             
             # Filter: High spread (low liquidity)
             if spread_pct > 1.0:  # > 1% spread
+                print(f"[Momentum]   ❌ {symbol}: Spread too high ({spread_pct:.2f}%)")
                 return None
             
             # Calculate volume ratio (current vs average)
@@ -160,7 +182,10 @@ class MomentumTradingService:
             
             # Filter: Volume spike required
             if volume_ratio < self.config['volume_spike_ratio']:
+                print(f"[Momentum]   ❌ {symbol}: Volume not spiking ({volume_ratio:.2f}x, need {self.config['volume_spike_ratio']}x)")
                 return None
+            
+            print(f"[Momentum]   🎯 {symbol}: Passed filters! Vol spike {volume_ratio:.2f}x - Asking AI...")
             
             # Prepare features for AI model
             features = {
@@ -177,6 +202,8 @@ class MomentumTradingService:
             
             # Get AI prediction
             ai_result = self.ai_model.predict(features, candles)
+            
+            print(f"[Momentum]   🤖 {symbol}: AI confidence = {ai_result['confidence']:.0%} (need {self.config['ai_confidence_threshold']:.0%})")
             ai_confidence = ai_result['confidence']
             predicted_exit = ai_result['predicted_exit']
             
