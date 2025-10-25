@@ -31,8 +31,13 @@ from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI(title="TradingBot v2")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins (or specify your frontend URL)
-    allow_credentials=False,  # Must be False when allow_origins is "*"
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "https://rileystrading.fivestarstorage.com.au",
+        "https://tradingbot-frontend-tlq2.vercel.app",
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
