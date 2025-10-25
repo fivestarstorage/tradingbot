@@ -66,3 +66,20 @@ class Trade(Base):
     meta = Column(JSON)
 
 
+class SchedulerRun(Base):
+    __tablename__ = 'scheduler_runs'
+    id = Column(Integer, primary_key=True)
+    started_at = Column(DateTime, default=datetime.utcnow, index=True)
+    inserted = Column(Integer, default=0)
+    skipped = Column(Integer, default=0)
+    total = Column(Integer, default=0)
+    positive = Column(Integer, default=0)
+    negative = Column(Integer, default=0)
+    neutral = Column(Integer, default=0)
+    signals = Column(Integer, default=0)
+    buys = Column(Integer, default=0)
+    sells = Column(Integer, default=0)
+    notes = Column(Text)
+    meta = Column(JSON)
+
+

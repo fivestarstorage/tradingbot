@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from apscheduler.schedulers.background import BackgroundScheduler
 from .db import Base, engine, get_db
-from .models import NewsArticle, Signal, Position, Trade
+from .models import NewsArticle, Signal, Position, Trade, SchedulerRun
 from .news_service import fetch_and_store_news
 from .ai_decider import AIDecider
 from .trading_service import TradingService
@@ -145,6 +145,21 @@ def api_logs(limit: int = Query(200, ge=1, le=1000), db: Session = Depends(get_d
     return merged[:limit]
 
 
+@app.get('/api/runs')
+def api_runs(limit: int = 20, db: Session = Depends(get_db)):
+    rows = db.query(SchedulerRun).order_by(SchedulerRun.started_at.desc()).limit(limit).all()
+    return [
+        {
+            'started_at': r.started_at.isoformat() if r.started_at else None,
+            'inserted': r.inserted, 'skipped': r.skipped, 'total': r.total,
+            'positive': r.positive, 'negative': r.negative, 'neutral': r.neutral,
+            'signals': r.signals, 'buys': r.buys, 'sells': r.sells,
+            'notes': r.notes
+        }
+        for r in rows
+    ]
+
+
 @app.get('/api/sentiment')
 def api_sentiment(db: Session = Depends(get_db)):
     # Aggregate simple counts by sentiment and top tickers
@@ -173,6 +188,16 @@ def api_sentiment(db: Session = Depends(get_db)):
 def api_git_status():
     # Stub: not wired to system git; return static OK to avoid 404 noise
     return {'status': 'ok', 'branch': None, 'dirty': False}
+
+
+@app.get('/api/health')
+def api_health():
+    try:
+        # Simple checks
+        _ = binance.client.ping()
+        return {'ok': True, 'binance': True}
+    except Exception:
+        return {'ok': True, 'binance': False}
 
 
 @app.get('/favicon.ico')
@@ -230,12 +255,24 @@ def scheduled_job():
     from .db import SessionLocal
     db = SessionLocal()
     try:
+        run = SchedulerRun()
         api_key = os.getenv('CRYPTONEWS_API_KEY', '')
         if api_key:
-            fetch_and_store_news(db, api_key)
+            stats = fetch_and_store_news(db, api_key)
+            run.inserted = stats.get('inserted', 0)
+            run.skipped = stats.get('skipped', 0)
+            run.total = stats.get('total', 0)
         # decide on a default watchlist
         symbols = [s.strip().upper() for s in os.getenv('WATCHLIST', 'BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT').split(',')]
         signals = ai_decider.decide(db, symbols)
+        run.signals = len(signals)
+        # quick sentiment snapshot
+        total = db.query(func.count(NewsArticle.id)).scalar() or 0
+        pos = db.query(func.count(NewsArticle.id)).filter(NewsArticle.sentiment.ilike('Positive%')).scalar() or 0
+        neg = db.query(func.count(NewsArticle.id)).filter(NewsArticle.sentiment.ilike('Negative%')).scalar() or 0
+        run.positive = pos
+        run.negative = neg
+        run.neutral = max(total - pos - neg, 0)
         # auto-trade policy: execute only if AUTO_TRADE=true and confidence >= threshold
         if os.getenv('AUTO_TRADE', 'false').lower() == 'true':
             threshold = int(os.getenv('AUTO_TRADE_CONFIDENCE', '75'))
@@ -249,6 +286,7 @@ def scheduled_job():
                     check = trade_service.verify_buy(s.symbol, per_trade_usdt)
                     if check['has_funds'] and check['is_tradeable'] and check['symbol_ok']:
                         trade_service.buy_market(db, s.symbol, per_trade_usdt)
+                        run.buys += 1
                 elif s.action == 'SELL':
                     # sell full available asset (simple policy)
                     asset = s.symbol.replace('USDT', '')
@@ -256,6 +294,9 @@ def scheduled_job():
                     qty = float(bal.get('free', 0.0))
                     if qty > 0:
                         trade_service.sell_market(db, s.symbol, qty)
+                        run.sells += 1
+        db.add(run)
+        db.commit()
     finally:
         db.close()
 
