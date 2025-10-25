@@ -373,7 +373,7 @@ def api_ai_insight(db: Session = Depends(get_db)):
 
 @app.get('/api/portfolio/recommendations')
 def api_portfolio_recommendations(db: Session = Depends(get_db)):
-    """Get live portfolio with AI recommendations and technical data."""
+    """Get live portfolio with AI recommendations and HYBRID scores."""
     from .portfolio_manager import PortfolioManager
     
     try:
@@ -385,30 +385,8 @@ def api_portfolio_recommendations(db: Session = Depends(get_db)):
         
         recommendations = []
         for holding in holdings:
-            # Get AI analysis for this holding
+            # Get HYBRID AI analysis (news + technical)
             analysis = portfolio_mgr.analyze_holding(db, holding)
-            
-            # Get latest candle data
-            candles = portfolio_mgr.get_recent_candles(holding['symbol'], interval='5m', limit=50)
-            
-            # Calculate technical indicators
-            tech_data = {}
-            if candles:
-                prices = [c['close'] for c in candles]
-                current_price = candles[-1]['close']
-                sma_20 = sum(prices[-20:]) / 20 if len(prices) >= 20 else current_price
-                sma_50 = sum(prices[-50:]) / 50 if len(prices) >= 50 else current_price
-                price_change_5m = ((current_price - candles[-2]['close']) / candles[-2]['close'] * 100) if len(candles) >= 2 else 0
-                price_change_1h = ((current_price - candles[0]['close']) / candles[0]['close'] * 100) if len(candles) >= 12 else 0
-                
-                tech_data = {
-                    'current_price': current_price,
-                    'sma_20': sma_20,
-                    'sma_50': sma_50,
-                    'price_change_5m': price_change_5m,
-                    'price_change_1h': price_change_1h,
-                    'price_trend': 'up' if current_price > sma_20 else 'down'
-                }
             
             recommendations.append({
                 'symbol': analysis.get('symbol'),
@@ -420,14 +398,39 @@ def api_portfolio_recommendations(db: Session = Depends(get_db)):
                 'free': holding['free'],
                 'locked': holding['locked'],
                 'value_usdt': analysis.get('value', 0),
-                'technical': tech_data
+                # Hybrid scores
+                'news_score': analysis.get('news_score', 50),
+                'technical_score': analysis.get('technical_score', 50),
+                'hybrid_score': analysis.get('hybrid_score', 50),
+                # Technical data
+                'technical': analysis.get('technical_data', {}),
+                # News data
+                'news_data': analysis.get('news_data', {})
             })
         
         return recommendations
         
     except Exception as e:
         print(f"Error getting portfolio recommendations: {e}")
+        import traceback
+        traceback.print_exc()
         return []
+
+
+@app.get('/api/portfolio/coin/{symbol}')
+def api_coin_insights(symbol: str, db: Session = Depends(get_db)):
+    """Get detailed insights for a specific coin including candle data for charting."""
+    from .portfolio_manager import PortfolioManager
+    
+    try:
+        portfolio_mgr = PortfolioManager(binance)
+        insights = portfolio_mgr.get_coin_insights(db, symbol.upper())
+        return insights
+    except Exception as e:
+        print(f"Error getting coin insights for {symbol}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get('/api/git/status')
