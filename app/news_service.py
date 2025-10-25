@@ -10,7 +10,7 @@ from .models import NewsArticle
 
 CRYPTO_NEWS_URL = os.getenv(
     'CRYPTONEWS_URL',
-    'https://cryptonews-api.com/api/v1/category?section=alltickers&items=100&page=1'
+    'https://cryptonews-api.com/api/v1/category?section=alltickers&items=20&page=1'
 )
 
 COINDESK_NEWS_URL = 'https://www.coindesk.com/latest-crypto-news'
