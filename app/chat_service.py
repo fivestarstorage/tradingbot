@@ -72,6 +72,64 @@ class ChatService:
                 return {'text': f"Tool '{tool}' failed: {e}", 'error': True}
         return {'text': decision.get('reply', content)}
 
+    def handle_history(self, db: Session, messages: list[dict]) -> Dict[str, Any]:
+        """Memory-aware handler that takes full chat history.
+        messages: [{role: 'user'|'assistant', content: str}, ...]
+        """
+        # If no OpenAI, fallback to last message heuristic
+        if self.client is None:
+            last = ''
+            for m in reversed(messages or []):
+                if m.get('role') == 'user':
+                    last = m.get('content','')
+                    break
+            return self.handle(db, last)
+
+        tools = {
+            'get_overview': self._get_overview,
+            'get_positions': self._get_positions,
+            'get_signals': self._get_signals,
+            'get_news': self._get_news,
+            'get_trending': self._get_trending,
+            'recommend_from_news': self._recommend_from_news,
+            'verify_buy': self._verify_buy,
+            'verify_sell': self._verify_sell,
+            'buy': self._buy,
+            'sell': self._sell,
+        }
+
+        system = (
+            "You are a crypto trading assistant for a Binance + news-driven bot. "
+            "Maintain conversation context. When a tool is needed, respond with JSON only in this schema:\n"
+            "{\n  \"reply\": string,\n  \"tool\": string | null,\n  \"args\": object | null\n}\n"
+            "Valid tools: get_overview, get_positions, get_signals, get_news, get_trending, recommend_from_news, verify_buy, verify_sell, buy, sell.\n"
+            "For buy/sell/verify_* require: symbol (e.g., BTCUSDT). For buy also require usdt (number). For sell require quantity (number)."
+        )
+
+        chat_msgs = [{'role':'system','content': system}] + [
+            {'role': m.get('role'), 'content': m.get('content','')} for m in (messages or [])
+        ]
+        chat = self.client.chat.completions.create(
+            model=self.model,
+            temperature=0.2,
+            messages=chat_msgs
+        )
+        content = chat.choices[0].message.content
+        try:
+            decision = json.loads(content)
+        except Exception:
+            decision = {'reply': content, 'tool': None, 'args': None}
+
+        tool = decision.get('tool')
+        args = decision.get('args') or {}
+        if tool in tools:
+            try:
+                result = tools[tool](db, args)
+                return {'text': decision.get('reply', ''), 'tool': tool, 'result': result}
+            except Exception as e:
+                return {'text': f"Tool '{tool}' failed: {e}", 'error': True}
+        return {'text': decision.get('reply', content)}
+
     # Tools
     def _get_overview(self, db: Session, args: Dict[str, Any]):
         try:

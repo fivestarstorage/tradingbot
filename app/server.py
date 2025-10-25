@@ -117,7 +117,7 @@ def api_signals(db: Session = Depends(get_db)):
             'confidence': s.confidence,
             'reasoning': s.reasoning,
             'ref': s.ref_article_url,
-            'created_at': s.created_at.isoformat()
+            'created_at': (s.created_at.replace(tzinfo=timezone.utc).isoformat().replace('+00:00','Z') if s.created_at else None)
         } for s in sigs
     ]
 
@@ -265,7 +265,7 @@ def api_trades(limit: int = 50, db: Session = Depends(get_db)):
             'quantity': t.quantity,
             'price': t.price,
             'notional': t.notional,
-            'created_at': t.created_at.isoformat(),
+            'created_at': (t.created_at.replace(tzinfo=timezone.utc).isoformat().replace('+00:00','Z') if t.created_at else None),
         } for t in trs
     ]
 
@@ -428,6 +428,12 @@ def api_sell(symbol: str, quantity: float, db: Session = Depends(get_db)):
 @app.post('/api/chat')
 def api_chat(q: str, db: Session = Depends(get_db)):
     return chat_service.handle(db, q)
+
+
+@app.post('/api/chat/history')
+def api_chat_history(payload: dict, db: Session = Depends(get_db)):
+    messages = payload.get('messages', [])
+    return chat_service.handle_history(db, messages)
 
 
 @app.get('/api/recommend')
