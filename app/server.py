@@ -787,3 +787,210 @@ def api_runs_refresh():
     return {'ok': True}
 
 
+# ==================== MOMENTUM TRADING ENDPOINTS ====================
+
+@app.get('/api/momentum/overview')
+def api_momentum_overview(db: Session = Depends(get_db)):
+    """Get momentum trading overview and stats"""
+    from .momentum_service import MomentumTradingService
+    
+    momentum_service = MomentumTradingService(binance)
+    overview = momentum_service.get_market_overview(db)
+    
+    return overview
+
+
+@app.get('/api/momentum/signals')
+def api_momentum_signals(
+    status: str = 'ACTIVE',
+    limit: int = 50,
+    db: Session = Depends(get_db)
+):
+    """Get momentum signals"""
+    from .models import MomentumSignal
+    
+    query = db.query(MomentumSignal)
+    
+    if status:
+        query = query.filter(MomentumSignal.status == status)
+    
+    signals = query.order_by(
+        MomentumSignal.triggered_at.desc()
+    ).limit(limit).all()
+    
+    return [{
+        'id': s.id,
+        'symbol': s.symbol,
+        'interval': s.interval,
+        'price_change_pct': s.price_change_pct,
+        'volume_24h': s.volume_24h,
+        'volume_ratio': s.volume_ratio,
+        'ai_confidence': s.ai_confidence,
+        'predicted_exit': s.predicted_exit,
+        'technical_score': s.technical_score,
+        'status': s.status,
+        'triggered_at': s.triggered_at.isoformat() if s.triggered_at else None,
+        'expires_at': s.expires_at.isoformat() if s.expires_at else None,
+        'meta': s.meta,
+    } for s in signals]
+
+
+@app.get('/api/momentum/trades')
+def api_momentum_trades(
+    status: str = None,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """Get momentum trades"""
+    from .models import MomentumTrade
+    
+    query = db.query(MomentumTrade)
+    
+    if status:
+        query = query.filter(MomentumTrade.status == status)
+    
+    trades = query.order_by(
+        MomentumTrade.opened_at.desc()
+    ).limit(limit).all()
+    
+    return [{
+        'id': t.id,
+        'signal_id': t.signal_id,
+        'symbol': t.symbol,
+        'side': t.side,
+        'entry_price': t.entry_price,
+        'exit_price': t.exit_price,
+        'quantity': t.quantity,
+        'usdt_value': t.usdt_value,
+        'profit_loss': t.profit_loss,
+        'profit_loss_pct': t.profit_loss_pct,
+        'ai_entry_confidence': t.ai_entry_confidence,
+        'ai_exit_confidence': t.ai_exit_confidence,
+        'stop_loss': t.stop_loss,
+        'take_profit': t.take_profit,
+        'status': t.status,
+        'opened_at': t.opened_at.isoformat() if t.opened_at else None,
+        'closed_at': t.closed_at.isoformat() if t.closed_at else None,
+        'duration_seconds': t.duration_seconds,
+        'exit_reason': t.exit_reason,
+    } for t in trades]
+
+
+@app.post('/api/momentum/scan')
+def api_momentum_scan(db: Session = Depends(get_db)):
+    """Manually trigger momentum signal scan"""
+    from .momentum_service import MomentumTradingService
+    
+    momentum_service = MomentumTradingService(binance)
+    signals = momentum_service.scan_for_signals(db)
+    
+    return {
+        'ok': True,
+        'signals_found': len(signals),
+        'signals': [{
+            'symbol': s.symbol,
+            'price_change_pct': s.price_change_pct,
+            'ai_confidence': s.ai_confidence,
+        } for s in signals]
+    }
+
+
+@app.post('/api/momentum/trade/{signal_id}')
+def api_momentum_execute_trade(signal_id: int, db: Session = Depends(get_db)):
+    """Execute a trade for a specific signal"""
+    from .momentum_service import MomentumTradingService
+    from .models import MomentumSignal
+    
+    signal = db.query(MomentumSignal).filter(MomentumSignal.id == signal_id).first()
+    
+    if not signal:
+        raise HTTPException(status_code=404, detail="Signal not found")
+    
+    if signal.status != 'ACTIVE':
+        raise HTTPException(status_code=400, detail="Signal is not active")
+    
+    momentum_service = MomentumTradingService(binance)
+    trade = momentum_service.execute_trade(db, signal)
+    
+    if not trade:
+        raise HTTPException(status_code=500, detail="Failed to execute trade")
+    
+    return {
+        'ok': True,
+        'trade_id': trade.id,
+        'symbol': trade.symbol,
+        'quantity': trade.quantity,
+        'entry_price': trade.entry_price,
+    }
+
+
+@app.post('/api/momentum/close/{trade_id}')
+def api_momentum_close_trade(trade_id: int, db: Session = Depends(get_db)):
+    """Manually close a momentum trade"""
+    from .momentum_service import MomentumTradingService
+    from .models import MomentumTrade
+    
+    trade = db.query(MomentumTrade).filter(MomentumTrade.id == trade_id).first()
+    
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+    
+    if trade.status != 'OPEN':
+        raise HTTPException(status_code=400, detail="Trade is not open")
+    
+    # Get current price
+    ticker = binance.get_ticker(trade.symbol)
+    current_price = float(ticker['price'])
+    
+    momentum_service = MomentumTradingService(binance)
+    momentum_service._close_position(db, trade, current_price, 'MANUAL')
+    
+    return {
+        'ok': True,
+        'trade_id': trade.id,
+        'exit_price': trade.exit_price,
+        'profit_loss': trade.profit_loss,
+        'profit_loss_pct': trade.profit_loss_pct,
+    }
+
+
+@app.post('/api/momentum/toggle')
+def api_momentum_toggle(enabled: bool, db: Session = Depends(get_db)):
+    """Enable/disable momentum trading bot"""
+    # Store state in a simple file or environment variable
+    state_file = '/tmp/momentum_bot_state.txt'
+    
+    with open(state_file, 'w') as f:
+        f.write('enabled' if enabled else 'disabled')
+    
+    return {
+        'ok': True,
+        'enabled': enabled,
+        'message': 'Momentum trading ' + ('enabled' if enabled else 'disabled')
+    }
+
+
+@app.get('/api/momentum/status')
+def api_momentum_status():
+    """Get momentum bot status"""
+    state_file = '/tmp/momentum_bot_state.txt'
+    
+    try:
+        with open(state_file, 'r') as f:
+            state = f.read().strip()
+            enabled = state == 'enabled'
+    except:
+        enabled = False
+    
+    return {
+        'enabled': enabled,
+        'config': {
+            'min_price_change': os.getenv('MOMENTUM_MIN_PRICE_CHANGE', '20'),
+            'min_volume': os.getenv('MOMENTUM_MIN_VOLUME', '1000000'),
+            'ai_threshold': os.getenv('MOMENTUM_AI_THRESHOLD', '0.8'),
+            'max_position_pct': os.getenv('MOMENTUM_MAX_POSITION', '10'),
+            'stop_loss_pct': os.getenv('MOMENTUM_STOP_LOSS', '5'),
+        }
+    }
+
+
