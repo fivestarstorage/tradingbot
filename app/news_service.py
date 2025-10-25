@@ -1,6 +1,6 @@
 import os
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from .models import NewsArticle
 
@@ -43,10 +43,24 @@ def fetch_and_store_news(db: Session, api_key: str):
             changed = False
             # update date if not set
             new_dt = parse_date(item.get('date'))
-            # Always normalize stored date from raw if available
-            if new_dt and (not existing.date or existing.date != new_dt):
-                existing.date = new_dt
-                changed = True
+            # Always normalize stored date from raw if available (handle naive vs aware)
+            if new_dt:
+                try:
+                    need_update = False
+                    if not existing.date:
+                        need_update = True
+                    elif existing.date.tzinfo is None:
+                        # treat stored as UTC naive; compare in UTC
+                        need_update = (existing.date.replace(tzinfo=timezone.utc) != new_dt.astimezone(timezone.utc))
+                    else:
+                        need_update = (existing.date != new_dt)
+                    if need_update:
+                        existing.date = new_dt
+                        changed = True
+                except Exception:
+                    # best effort set
+                    existing.date = new_dt
+                    changed = True
             # update sentiment/title/text/tickers if changed
             if item.get('sentiment') and item.get('sentiment') != existing.sentiment:
                 existing.sentiment = item.get('sentiment')
