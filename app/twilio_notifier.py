@@ -267,6 +267,103 @@ class TwilioNotifier:
         
         return message
     
+    def send_news_summary(self, news_data):
+        """
+        Send AI-generated news summary SMS
+        
+        Args:
+            news_data: Dict with news summary info
+            {
+                'total_articles': 25,
+                'new_articles': 10,
+                'sentiment_positive': 15,
+                'sentiment_negative': 5,
+                'sentiment_neutral': 5,
+                'top_tickers': ['BTC', 'ETH', 'XRP'],
+                'top_stories': [
+                    {'title': '...', 'sentiment': 'Positive'},
+                    ...
+                ],
+                'ai_summary': 'Market is showing bullish momentum...',
+                'key_insight': 'XRP leading gains on institutional adoption'
+            }
+        """
+        if not self.client:
+            logger.warning("Twilio not configured - skipping news summary SMS")
+            return False
+        
+        try:
+            message = self._format_news_summary(news_data)
+            
+            # Send to all recipients
+            results = []
+            for recipient in self.recipients:
+                try:
+                    sent_message = self.client.messages.create(
+                        body=message,
+                        messaging_service_sid=self.messaging_service_sid,
+                        to=recipient['number']
+                    )
+                    logger.info(f"✅ News summary SMS sent to {recipient['name']}")
+                    results.append({'success': True, 'to': recipient['name']})
+                except Exception as e:
+                    logger.error(f"❌ Failed to send news summary to {recipient['name']}: {e}")
+                    results.append({'success': False, 'to': recipient['name'], 'error': str(e)})
+            
+            return results
+        
+        except Exception as e:
+            logger.error(f"Error sending news summary: {e}")
+            return False
+    
+    def _format_news_summary(self, news_data):
+        """Format news summary into SMS message"""
+        total = news_data.get('total_articles', 0)
+        new = news_data.get('new_articles', 0)
+        pos = news_data.get('sentiment_positive', 0)
+        neg = news_data.get('sentiment_negative', 0)
+        neu = news_data.get('sentiment_neutral', 0)
+        tickers = news_data.get('top_tickers', [])
+        ai_summary = news_data.get('ai_summary', '')
+        key_insight = news_data.get('key_insight', '')
+        top_stories = news_data.get('top_stories', [])
+        
+        # Determine market sentiment emoji
+        if pos > neg * 1.5:
+            sentiment_emoji = '📈'
+            sentiment_text = 'BULLISH'
+        elif neg > pos * 1.5:
+            sentiment_emoji = '📉'
+            sentiment_text = 'BEARISH'
+        else:
+            sentiment_emoji = '➡️'
+            sentiment_text = 'MIXED'
+        
+        message = f"📰 NEWS UPDATE\n\n"
+        
+        message += f"{sentiment_emoji} Market Sentiment: {sentiment_text}\n"
+        message += f"• Positive: {pos}\n"
+        message += f"• Negative: {neg}\n"
+        message += f"• Neutral: {neu}\n\n"
+        
+        if tickers:
+            message += f"🔥 Trending: {', '.join(tickers[:5])}\n\n"
+        
+        if ai_summary:
+            # Truncate if too long (SMS limit ~400 chars for summary)
+            if len(ai_summary) > 300:
+                ai_summary = ai_summary[:297] + "..."
+            message += f"💡 AI Analysis:\n{ai_summary}\n\n"
+        
+        if key_insight:
+            if len(key_insight) > 150:
+                key_insight = key_insight[:147] + "..."
+            message += f"⚡ Key Insight:\n{key_insight}\n\n"
+        
+        message += f"📊 Processed {new} new articles (Total: {total})"
+        
+        return message
+    
     def test_sms(self):
         """Send a test SMS to verify setup"""
         if not self.client:

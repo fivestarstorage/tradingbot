@@ -617,6 +617,104 @@ Format:
         except Exception as e:
             print(f"Error generating insights: {e}")
         
+        # Send news summary SMS with AI overview
+        try:
+            from .twilio_notifier import TwilioNotifier
+            sms_notifier = TwilioNotifier()
+            
+            if sms_notifier.client:
+                # Get recent news articles from this run
+                recent_news = db.query(NewsArticle).order_by(NewsArticle.ingested_at.desc()).limit(20).all()
+                
+                # Extract sentiment counts
+                pos_count = sum(1 for n in recent_news if n.sentiment and 'positive' in n.sentiment.lower())
+                neg_count = sum(1 for n in recent_news if n.sentiment and 'negative' in n.sentiment.lower())
+                neu_count = len(recent_news) - pos_count - neg_count
+                
+                # Extract top tickers
+                ticker_counts = {}
+                for article in recent_news:
+                    if article.tickers:
+                        tickers = article.tickers.split(',') if isinstance(article.tickers, str) else article.tickers
+                        for ticker in tickers:
+                            ticker = ticker.strip()
+                            if ticker:
+                                ticker_counts[ticker] = ticker_counts.get(ticker, 0) + 1
+                
+                # Sort by frequency
+                top_tickers = sorted(ticker_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+                top_tickers = [t[0] for t in top_tickers]
+                
+                # Get top stories (most recent with sentiment)
+                top_stories = []
+                for article in recent_news[:3]:
+                    if article.sentiment:
+                        top_stories.append({
+                            'title': article.title[:60],
+                            'sentiment': article.sentiment
+                        })
+                
+                # Generate AI summary of news
+                try:
+                    news_summaries = "\n".join([
+                        f"- {n.title[:80]}: {n.sentiment or 'Neutral'}"
+                        for n in recent_news[:10]
+                    ])
+                    
+                    summary_prompt = f"""Analyze these recent crypto news headlines and provide a brief market overview.
+
+News Headlines:
+{news_summaries}
+
+Sentiment: {pos_count} positive, {neg_count} negative, {neu_count} neutral
+Trending: {', '.join(top_tickers) if top_tickers else 'Various'}
+
+Provide:
+1. A concise 1-2 sentence market summary
+2. A key insight or trend (1 sentence)
+
+Respond with valid JSON:
+{{
+  "summary": "Brief market overview focusing on overall trend",
+  "key_insight": "Most important takeaway or trend"
+}}"""
+
+                    ai_response = openai.chat.completions.create(
+                        model='gpt-4o-mini',
+                        messages=[
+                            {"role": "system", "content": "You are a crypto market analyst providing concise news summaries. Always respond with valid JSON."},
+                            {"role": "user", "content": summary_prompt}
+                        ],
+                        response_format={"type": "json_object"},
+                        temperature=0.4
+                    )
+                    
+                    ai_result = json.loads(ai_response.choices[0].message.content)
+                    ai_summary = ai_result.get('summary', '')
+                    key_insight = ai_result.get('key_insight', '')
+                except Exception as e:
+                    print(f"Error generating AI news summary: {e}")
+                    ai_summary = "Market analysis unavailable"
+                    key_insight = ""
+                
+                # Send SMS
+                news_data = {
+                    'total_articles': run.total or 0,
+                    'new_articles': run.inserted or 0,
+                    'sentiment_positive': pos_count,
+                    'sentiment_negative': neg_count,
+                    'sentiment_neutral': neu_count,
+                    'top_tickers': top_tickers,
+                    'top_stories': top_stories,
+                    'ai_summary': ai_summary,
+                    'key_insight': key_insight
+                }
+                
+                sms_notifier.send_news_summary(news_data)
+                print(f"✅ News summary SMS sent")
+        except Exception as e:
+            print(f"Error sending news summary SMS: {e}")
+        
         run.signals = len(signals)
         # quick sentiment snapshot
         total = db.query(func.count(NewsArticle.id)).scalar() or 0
