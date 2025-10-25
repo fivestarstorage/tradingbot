@@ -1,9 +1,10 @@
 import os
 from dotenv import load_dotenv
-from fastapi import FastAPI, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Depends, Request, Query
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from apscheduler.schedulers.background import BackgroundScheduler
 from .db import Base, engine, get_db
 from .models import NewsArticle, Signal, Position, Trade
@@ -74,6 +75,86 @@ def api_signals(db: Session = Depends(get_db)):
             'created_at': s.created_at.isoformat()
         } for s in sigs
     ]
+
+
+@app.get('/api/overview')
+def api_overview(db: Session = Depends(get_db)):
+    # Portfolio summary from DB and Binance
+    try:
+        usdt = binance.get_account_balance('USDT') or {'free': 0.0, 'locked': 0.0}
+    except Exception:
+        usdt = {'free': 0.0, 'locked': 0.0}
+    open_positions = db.query(Position).filter(Position.status == 'OPEN').count()
+    trades_24h = db.query(Trade).count()
+    last_signal = db.query(Signal).order_by(Signal.created_at.desc()).first()
+    return {
+        'usdt_free': usdt.get('free', 0.0),
+        'usdt_locked': usdt.get('locked', 0.0),
+        'open_positions': open_positions,
+        'trades_total': trades_24h,
+        'last_signal': {
+            'symbol': last_signal.symbol if last_signal else None,
+            'action': last_signal.action if last_signal else None,
+            'confidence': last_signal.confidence if last_signal else None,
+            'created_at': last_signal.created_at.isoformat() if last_signal else None,
+        }
+    }
+
+
+@app.get('/api/logs')
+def api_logs(limit: int = Query(200, ge=1, le=1000), db: Session = Depends(get_db)):
+    sigs = db.query(Signal).order_by(Signal.created_at.desc()).limit(limit).all()
+    trs = db.query(Trade).order_by(Trade.created_at.desc()).limit(limit).all()
+    sig_entries = [{
+        'type': 'signal',
+        'created_at': s.created_at.isoformat(),
+        'message': f"{s.symbol} {s.action} ({s.confidence}%) - {s.reasoning[:120] if s.reasoning else ''}"
+    } for s in sigs]
+    tr_entries = [{
+        'type': 'trade',
+        'created_at': t.created_at.isoformat(),
+        'message': f"{t.side} {t.symbol} qty={t.quantity:.6f} @ {t.price:.4f} (${t.notional:.2f})"
+    } for t in trs]
+    # Merge and sort by time desc
+    merged = sig_entries + tr_entries
+    merged.sort(key=lambda x: x['created_at'], reverse=True)
+    return merged[:limit]
+
+
+@app.get('/api/sentiment')
+def api_sentiment(db: Session = Depends(get_db)):
+    # Aggregate simple counts by sentiment and top tickers
+    total = db.query(func.count(NewsArticle.id)).scalar() or 0
+    pos = db.query(func.count(NewsArticle.id)).filter(NewsArticle.sentiment.ilike('Positive%')).scalar() or 0
+    neg = db.query(func.count(NewsArticle.id)).filter(NewsArticle.sentiment.ilike('Negative%')).scalar() or 0
+    neu = total - pos - neg
+    # naive top tickers by frequency
+    latest = db.query(NewsArticle).order_by(NewsArticle.created_at.desc()).limit(500).all()
+    from collections import Counter
+    c = Counter()
+    for a in latest:
+        if a.tickers:
+            for tk in a.tickers.split(','):
+                t = tk.strip().upper()
+                if t:
+                    c[t] += 1
+    top = c.most_common(10)
+    return {
+        'counts': {'total': total, 'positive': pos, 'negative': neg, 'neutral': neu},
+        'top_tickers': top
+    }
+
+
+@app.get('/api/git/status')
+def api_git_status():
+    # Stub: not wired to system git; return static OK to avoid 404 noise
+    return {'status': 'ok', 'branch': None, 'dirty': False}
+
+
+@app.get('/favicon.ico')
+def favicon():
+    # Empty 204 to silence browser requests
+    return Response(status_code=204)
 
 
 @app.post('/api/decide')
