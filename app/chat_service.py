@@ -20,6 +20,7 @@ class ChatService:
             'get_overview': self._get_overview,
             'get_positions': self._get_positions,
             'get_signals': self._get_signals,
+            'get_news': self._get_news,
             'get_trending': self._get_trending,
             'verify_buy': self._verify_buy,
             'verify_sell': self._verify_sell,
@@ -43,7 +44,7 @@ class ChatService:
             "When the user asks something, decide if a tool should be called. "
             "Respond with JSON only in the following schema: \n"
             "{\n  \"reply\": string,\n  \"tool\": string | null,\n  \"args\": object | null\n}\n"
-            "Valid tools: get_overview, get_positions, get_signals, get_trending, verify_buy, verify_sell, buy, sell.\n"
+            "Valid tools: get_overview, get_positions, get_signals, get_news, get_trending, verify_buy, verify_sell, buy, sell.\n"
             "For buy/sell/verify_* require: symbol (e.g., BTCUSDT). For buy also require usdt (number). For sell require quantity (number)."
         )
         chat = self.client.chat.completions.create(
@@ -92,6 +93,19 @@ class ChatService:
         return [
             {'symbol': s.symbol, 'action': s.action, 'confidence': s.confidence, 'created_at': s.created_at.isoformat()}
             for s in sigs
+        ]
+
+    def _get_news(self, db: Session, args: Dict[str, Any]):
+        limit = int(args.get('limit', 20))
+        rows = db.query(NewsArticle).order_by(NewsArticle.created_at.desc()).limit(limit).all()
+        return [
+            {
+                'title': n.title,
+                'url': n.news_url,
+                'tickers': n.tickers,
+                'sentiment': n.sentiment,
+                'time': (n.date or n.created_at).isoformat() if (n.date or n.created_at) else None
+            } for n in rows
         ]
 
     def _get_trending(self, db: Session, args: Dict[str, Any]):

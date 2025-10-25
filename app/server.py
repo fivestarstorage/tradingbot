@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from fastapi import FastAPI, Depends, Request, Query
+from fastapi import FastAPI, Depends, Request, Query, Header, HTTPException
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -14,13 +14,26 @@ from .trading_service import TradingService
 from .trending_service import compute_trending
 from .chat_service import ChatService
 from core.binance_client import BinanceClient
+import subprocess
 
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), '..', 'templates'))
 
 # Load environment from .env if present (project root)
 load_dotenv()
 
+from fastapi.middleware.cors import CORSMiddleware
+
 app = FastAPI(title="TradingBot v2")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        os.getenv('CORS_ORIGIN', 'http://localhost:3000'),
+        os.getenv('CORS_ORIGIN_2', ''),
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Init DB
 Base.metadata.create_all(bind=engine)
@@ -62,7 +75,8 @@ def api_news(db: Session = Depends(get_db)):
             'url': n.news_url,
             'sentiment': n.sentiment,
             'tickers': n.tickers,
-            'date': n.date.isoformat() if n.date else None
+            'date': n.date.isoformat() if n.date else None,
+            'ingested_at': n.created_at.isoformat() if n.created_at else None
         } for n in items
     ]
 
@@ -195,6 +209,21 @@ def api_sell(symbol: str, quantity: float, db: Session = Depends(get_db)):
 @app.post('/api/chat')
 def api_chat(q: str, db: Session = Depends(get_db)):
     return chat_service.handle(db, q)
+
+
+@app.post('/api/deploy/webhook')
+def api_deploy_webhook(x_deploy_token: str | None = Header(None)):
+    secret = os.getenv('DEPLOY_TOKEN', '')
+    if not secret or x_deploy_token != secret:
+        raise HTTPException(status_code=401, detail='Unauthorized')
+    try:
+        subprocess.run(["git", "fetch", "--all"], check=True)
+        subprocess.run(["git", "reset", "--hard", "origin/main"], check=True)
+        subprocess.run(["pip3", "install", "-r", "requirements.txt"], check=False)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Deploy failed: {e}")
+    os._exit(0)
+    return { 'ok': True }
 
 
 def scheduled_job():

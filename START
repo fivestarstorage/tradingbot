@@ -28,3 +28,10 @@ screen -r dashboard
 Stop dashboard:
 screen -S dashboard -X quit
 
+
+
+
+--------------------------------
+new start script 
+uvicorn app.server:app --host 0.0.0.0 --port 8000
+--------------------------------

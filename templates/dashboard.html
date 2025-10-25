@@ -241,6 +241,7 @@
                                 <th>Title</th>
                                 <th>Tickers</th>
                                 <th>Sentiment</th>
+                                <th>Time</th>
                             </tr>
                         </thead>
                         <tbody></tbody>
@@ -287,6 +288,7 @@
             <td><a href="${n.url}" target="_blank">${n.title}</a></td>
             <td>${n.tickers || ''}</td>
             <td>${n.sentiment || ''}</td>
+            <td class="muted">${fmtTime(n.date || n.ingested_at)}</td>
           </tr>
         `).join('');
         }
