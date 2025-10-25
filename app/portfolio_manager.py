@@ -148,10 +148,10 @@ class PortfolioManager:
             
             if not news:
                 return {
-                    'news_score': 50,  # Neutral
+                    'news_score': None,  # No news, don't impact score
                     'news_count': 0,
                     'sentiment_breakdown': {'positive': 0, 'neutral': 0, 'negative': 0},
-                    'trend': 'neutral',
+                    'trend': 'no_data',
                     'latest_headline': None
                 }
             
@@ -267,10 +267,44 @@ class PortfolioManager:
         
         return news
     
+    def get_ml_prediction(self, symbol: str) -> dict:
+        """Get ML prediction for a symbol if model exists"""
+        try:
+            import os
+            import pickle
+            models_dir = '/tmp/ml_models'
+            model_path = os.path.join(models_dir, f'{symbol}_model.pkl')
+            
+            if not os.path.exists(model_path):
+                return None
+            
+            # Check model age
+            import json
+            info_path = os.path.join(models_dir, f'{symbol}_info.json')
+            if os.path.exists(info_path):
+                with open(info_path, 'r') as f:
+                    info = json.load(f)
+                    from datetime import datetime
+                    trained_at = datetime.fromisoformat(info['trained_at'])
+                    days_old = (datetime.now() - trained_at).days
+                    
+                    # Don't use stale models (>7 days)
+                    if days_old > 7:
+                        return None
+                    
+                    # Use CoinMLService to get prediction
+                    from .ml_service import CoinMLService
+                    ml_service = CoinMLService(self.client)
+                    return ml_service.predict(symbol)
+            
+            return None
+        except:
+            return None
+    
     def analyze_holding(self, db: Session, holding: dict):
         """
-        Analyze a single holding using HYBRID news + technical data.
-        Returns: {action, confidence, reasoning, news_score, technical_score, hybrid_score}
+        Analyze a single holding using HYBRID news + technical + ML data.
+        Returns: {action, confidence, reasoning, news_score, technical_score, hybrid_score, ml_prediction}
         """
         symbol = holding['symbol']
         asset = holding['asset']
@@ -282,6 +316,9 @@ class PortfolioManager:
         # Calculate news score
         news_data = self.calculate_news_score(db, asset)
         
+        # Get ML prediction if available
+        ml_prediction = self.get_ml_prediction(symbol)
+        
         if not technical:
             return {
                 'action': 'HOLD',
@@ -290,13 +327,17 @@ class PortfolioManager:
                 'symbol': symbol,
                 'news_score': news_data['news_score'],
                 'technical_score': 0,
-                'hybrid_score': news_data['news_score'] // 2
+                'hybrid_score': 0 if news_data['news_score'] is None else news_data['news_score'] // 2
             }
         
         current_price = technical['current_price']
         
-        # Calculate hybrid score (weighted: 40% news, 60% technical)
-        hybrid_score = int(news_data['news_score'] * 0.4 + technical['technical_score'] * 0.6)
+        # Calculate hybrid score
+        # If no news data, use 100% technical. Otherwise: 40% news, 60% technical
+        if news_data['news_score'] is None:
+            hybrid_score = technical['technical_score']
+        else:
+            hybrid_score = int(news_data['news_score'] * 0.4 + technical['technical_score'] * 0.6)
         
         # Format news context for AI
         news = self.get_news_for_asset(db, asset, hours=6)
@@ -335,7 +376,14 @@ Value: ${current_price * quantity:.2f}
 🤖 HYBRID SCORE: {hybrid_score}/100
 (40% news + 60% technical)
 
-Based on this data, should we:
+{'🎯 MACHINE LEARNING PREDICTION:' if ml_prediction and not ml_prediction.get('error') else ''}
+{f"- Action: {ml_prediction.get('prediction')}" if ml_prediction and not ml_prediction.get('error') else ''}
+{f"- Confidence: {ml_prediction.get('confidence', 0):.1%}" if ml_prediction and not ml_prediction.get('error') else ''}
+{f"- Reasoning: {ml_prediction.get('reasoning')}" if ml_prediction and not ml_prediction.get('error') else ''}
+{f"- Model Accuracy: {ml_prediction.get('model_info', {}).get('test_accuracy', 0):.1%}" if ml_prediction and not ml_prediction.get('error') else ''}
+{'(No ML model trained for this asset)' if not ml_prediction or ml_prediction.get('error') else ''}
+
+Based on ALL this data (technical + news + ML), should we:
 - SELL (take profits, cut losses, or exit on weak signals)
 - HOLD (maintain position, strong fundamentals)
 - BUY_MORE (add to position - only if strong conviction)
@@ -380,6 +428,7 @@ Trading philosophy:
             result['hybrid_score'] = hybrid_score
             result['news_data'] = news_data
             result['technical_data'] = technical
+            result['ml_prediction'] = ml_prediction  # Include ML prediction
             
             return result
             
@@ -420,7 +469,10 @@ Trading philosophy:
         # Calculate hybrid score
         hybrid_score = 50
         if technical:
-            hybrid_score = int(news_data['news_score'] * 0.4 + technical['technical_score'] * 0.6)
+            if news_data['news_score'] is None:
+                hybrid_score = technical['technical_score']
+            else:
+                hybrid_score = int(news_data['news_score'] * 0.4 + technical['technical_score'] * 0.6)
         
         # Determine status
         if hybrid_score >= 80:
@@ -461,6 +513,95 @@ Trading philosophy:
                 'volume': c['volume']
             } for c in candles]
         }
+    
+    def monitor_watchlist(self, db: Session, auto_execute: bool = False):
+        """
+        Monitor watchlist coins and auto-buy when signals are strong.
+        """
+        from .models import Watchlist
+        from .trading_service import TradingService
+        import os
+        
+        watchlist = db.query(Watchlist).filter(Watchlist.enabled == True).all()
+        
+        if not watchlist:
+            return []
+        
+        print(f"\n[Watchlist] Monitoring {len(watchlist)} coins...")
+        results = []
+        trading_service = TradingService(self.client)
+        
+        for item in watchlist:
+            try:
+                fake_holding = {
+                    'symbol': item.symbol,
+                    'asset': item.asset,
+                    'quantity': 0
+                }
+                
+                analysis = self.analyze_holding(db, fake_holding)
+                item.last_checked_at = datetime.utcnow()
+                
+                hybrid_score = analysis.get('hybrid_score', 0)
+                ml_pred = analysis.get('ml_prediction')
+                ml_confidence = ml_pred.get('confidence', 0) if ml_pred and not ml_pred.get('error') else 0
+                
+                should_buy = False
+                buy_reason = ""
+                
+                # Log current scores for debugging
+                print(f"[Watchlist] {item.symbol}: Hybrid={hybrid_score}/100 (need {item.buy_trigger_score}), ML={ml_confidence:.0%} (need 75%)")
+                
+                if hybrid_score >= item.buy_trigger_score:
+                    should_buy = True
+                    buy_reason = f"Hybrid score {hybrid_score}/100 >= {item.buy_trigger_score}"
+                elif ml_pred and ml_pred.get('prediction') == 'BUY' and ml_confidence >= 0.75:
+                    should_buy = True
+                    buy_reason = f"ML BUY {ml_confidence:.0%} confidence"
+                else:
+                    # Log why we're not buying
+                    if hybrid_score < item.buy_trigger_score:
+                        print(f"[Watchlist]   → No buy: Hybrid score too low ({hybrid_score} < {item.buy_trigger_score})")
+                    if ml_confidence < 0.75:
+                        print(f"[Watchlist]   → No buy: ML confidence too low ({ml_confidence:.0%} < 75%)")
+                
+                if should_buy and auto_execute:
+                    try:
+                        result = trading_service.buy_market(db, item.symbol, item.max_buy_usdt)
+                        if result:
+                            print(f"[Watchlist] ✅ AUTO-BOUGHT {item.symbol}: ${item.max_buy_usdt}")
+                            item.enabled = False  # Remove from watchlist
+                            db.add(BotLog(
+                                level='INFO',
+                                category='WATCHLIST',
+                                message=f"Auto-bought {item.symbol}: {buy_reason}"
+                            ))
+                            
+                            # Send SMS notification
+                            if self.sms_notifier:
+                                try:
+                                    self.sms_notifier.send_trade_notification({
+                                        'action': 'BUY',
+                                        'symbol': item.symbol,
+                                        'price': result.price,
+                                        'quantity': result.quantity,
+                                        'amount': item.max_buy_usdt,
+                                        'bot_name': 'Watchlist Auto-Buy',
+                                        'reasoning': buy_reason
+                                    })
+                                except Exception as e:
+                                    print(f"SMS notification error: {e}")
+                    except Exception as e:
+                        print(f"[Watchlist] ❌ Failed to buy {item.symbol}: {e}")
+                        import traceback
+                        traceback.print_exc()
+                
+                results.append({'symbol': item.symbol, 'should_buy': should_buy, 'reason': buy_reason})
+            except Exception as e:
+                print(f"[Watchlist] Error analyzing {item.symbol}: {e}")
+        
+        db.commit()
+        return results
     
     def manage_portfolio(self, db: Session, auto_execute: bool = False):
         """
@@ -509,6 +650,25 @@ Trading philosophy:
                                     category='TRADE',
                                     message=f"Portfolio mgmt SELL: {symbol} qty={sell_qty:.6f}"
                                 ))
+                                
+                                # If sold everything, add to watchlist for monitoring
+                                if sell_pct >= 100:
+                                    from .models import Watchlist
+                                    existing = db.query(Watchlist).filter(Watchlist.symbol == symbol).first()
+                                    if not existing:
+                                        watchlist_item = Watchlist(
+                                            symbol=symbol,
+                                            asset=holding['asset'],
+                                            reason_added=f"Sold all holdings: {analysis['reasoning'][:100]}",
+                                            max_buy_usdt=50.0,  # Default buy amount
+                                            buy_trigger_score=70  # Will buy when score >= 70 (lower threshold for re-entry)
+                                        )
+                                        db.add(watchlist_item)
+                                        print(f"[Portfolio] Added {symbol} to watchlist after selling all")
+                                    elif not existing.enabled:
+                                        # Re-enable if was previously disabled
+                                        existing.enabled = True
+                                        print(f"[Portfolio] Re-enabled {symbol} in watchlist")
                                 
                                 # Send SMS notification
                                 if self.sms_notifier:

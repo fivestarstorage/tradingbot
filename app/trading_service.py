@@ -2,7 +2,7 @@ from typing import Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from core.binance_client import BinanceClient
 from .models import Trade, Position
-from decimal import Decimal, ROUND_DOWN, getcontext
+from decimal import Decimal, ROUND_DOWN, ROUND_UP, getcontext
 
 getcontext().prec = 28
 
@@ -53,11 +53,14 @@ class TradingService:
         # Ensure notional >= min_notional
         notional = quantity * Decimal(str(price))
         if min_notional and notional < min_notional:
-            # Try increasing by one step if within budget, else fail
-            alt_qty = self._floor_to_step((Decimal(str(min_notional)) / Decimal(str(price))), step_size)
-            if alt_qty * Decimal(str(price)) <= Decimal(str(usdt_amount)) and alt_qty >= min_qty:
-                quantity = alt_qty
-            else:
+            # Calculate minimum quantity needed to meet notional
+            min_qty_for_notional = Decimal(str(min_notional)) / Decimal(str(price))
+            # Round UP to next step (ceiling) to ensure we meet minimum
+            quantity = self._ceil_to_step(min_qty_for_notional, step_size)
+            # Check if this exceeds our budget
+            new_notional = quantity * Decimal(str(price))
+            if new_notional > Decimal(str(usdt_amount)) * Decimal('1.01'):  # Allow 1% overage
+                print(f"Cannot meet min notional ${min_notional} with ${usdt_amount} budget")
                 return None
         order = self.client.place_market_order(symbol, 'BUY', quantity)
         if not order:
@@ -181,6 +184,13 @@ class TradingService:
         if step <= 0:
             return value.quantize(Decimal('0.000001'), rounding=ROUND_DOWN)
         steps = (value / step).to_integral_value(rounding=ROUND_DOWN)
+        return steps * step
+    
+    def _ceil_to_step(self, value: Decimal, step: Decimal) -> Decimal:
+        """Round UP to nearest step (ceiling)"""
+        if step <= 0:
+            return value.quantize(Decimal('0.000001'), rounding=ROUND_UP)
+        steps = (value / step).to_integral_value(rounding=ROUND_UP)
         return steps * step
 
 

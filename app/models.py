@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, JSON, UniqueConstraint, Index
+from sqlalchemy import Column, Integer, String, Float, DateTime, Text, JSON, Boolean, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from .db import Base
@@ -156,5 +156,23 @@ class MarketSnapshot(Base):
     order_book_spread_pct = Column(Float)
     timestamp = Column(DateTime, default=datetime.utcnow, index=True)
     raw_data = Column(JSON)  # Full candle + ticker data
+
+
+class Watchlist(Base):
+    """
+    Tracks coins to monitor even after selling all holdings.
+    Bot continues analyzing and will auto-buy when opportunity arises.
+    """
+    __tablename__ = 'watchlist'
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String(32), index=True, nullable=False, unique=True)
+    asset = Column(String(16), nullable=False)  # BTC, ETH, etc
+    added_at = Column(DateTime, default=datetime.utcnow, index=True)
+    last_checked_at = Column(DateTime)
+    reason_added = Column(Text)  # "Sold all holdings" or "Manual add"
+    buy_trigger_score = Column(Integer, default=75)  # Hybrid score needed to trigger buy
+    max_buy_usdt = Column(Float, default=50.0)  # Max USDT to spend on auto-buy
+    enabled = Column(Boolean, default=True, index=True)  # Can disable monitoring
+    meta = Column(JSON)  # Store last analysis, etc
 
 

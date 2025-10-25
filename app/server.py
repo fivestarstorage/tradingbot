@@ -650,8 +650,14 @@ def scheduled_job():
         
         # Portfolio Management - analyze existing holdings
         portfolio_mgr = PortfolioManager(binance)
-        portfolio_auto = os.getenv('PORTFOLIO_AUTO_MANAGE', 'false').lower() == 'true'
+        # DEFAULT TO TRUE - auto-manage portfolio unless explicitly disabled
+        portfolio_auto = os.getenv('PORTFOLIO_AUTO_MANAGE', 'true').lower() == 'true'
         portfolio_recommendations = portfolio_mgr.manage_portfolio(db, auto_execute=portfolio_auto)
+        
+        # Watchlist Monitoring - check coins we sold for re-buy opportunities  
+        # DEFAULT TO TRUE - auto-buy watchlist unless explicitly disabled
+        watchlist_auto = os.getenv('WATCHLIST_AUTO_BUY', 'true').lower() == 'true'
+        watchlist_results = portfolio_mgr.monitor_watchlist(db, auto_execute=watchlist_auto)
         
         # Generate AI insights summary
         try:
@@ -811,6 +817,31 @@ def momentum_scanner_job():
                     category='MOMENTUM',
                     message=f"Signal: {s.symbol} +{s.price_change_pct:.2f}% (AI: {s.ai_confidence:.0%})"
                 ))
+        
+        # Check active signals and expire dead ones
+        from .models import MomentumSignal
+        from datetime import datetime, timedelta
+        
+        active_signals = db.query(MomentumSignal).filter(MomentumSignal.status == 'ACTIVE').all()
+        for signal in active_signals:
+            # Check if expired by time
+            if signal.expires_at and signal.expires_at < datetime.utcnow():
+                signal.status = 'EXPIRED'
+                print(f"[Momentum] Signal expired: {signal.symbol}")
+                continue
+            
+            # Check if momentum died (volume dropped, price reversed)
+            try:
+                ticker = binance.get_ticker(signal.symbol)
+                current_change = float(ticker.get('priceChangePercent', 0))
+                
+                # If price change dropped below threshold, momentum is dead
+                min_price_change = float(config.get('min_price_change_pct', 20))
+                if current_change < min_price_change * 0.5:  # Dropped to half the threshold
+                    signal.status = 'EXPIRED'
+                    print(f"[Momentum] Momentum died: {signal.symbol} (change now {current_change:.2f}%)")
+            except:
+                pass
         
         # Check open trades for exit conditions
         open_trades = db.query(MomentumTrade).filter(MomentumTrade.status == 'OPEN').all()
@@ -1235,5 +1266,205 @@ def api_logs_clear(older_than_days: int = 7, db: Session = Depends(get_db)):
         'deleted': deleted,
         'message': f'Cleared logs older than {older_than_days} days'
     }
+
+
+# ==================== MACHINE LEARNING ENDPOINTS ====================
+
+@app.post('/api/ml/train/{symbol}')
+def api_ml_train(symbol: str, days: int = 365, background: bool = False):
+    """Train a machine learning model for a specific coin"""
+    from .ml_service import CoinMLService
+    
+    if background:
+        # Train in background (for auto-retraining)
+        import threading
+        def train_background():
+            ml_service = CoinMLService(binance)
+            result = ml_service.train_model(symbol, days=days)
+            print(f"[ML] Background training complete for {symbol}: {result.get('test_accuracy', 0):.2%} accuracy")
+        
+        thread = threading.Thread(target=train_background, daemon=True)
+        thread.start()
+        return {'ok': True, 'message': f'Training {symbol} in background...'}
+    else:
+        # Train synchronously (for manual training via UI)
+        ml_service = CoinMLService(binance)
+        result = ml_service.train_model(symbol, days=days)
+        return result
+
+
+@app.get('/api/ml/predict/{symbol}')
+def api_ml_predict(symbol: str):
+    """Get ML prediction for a symbol"""
+    from .ml_service import CoinMLService
+    
+    ml_service = CoinMLService(binance)
+    result = ml_service.predict(symbol)
+    
+    return result
+
+
+@app.get('/api/ml/models')
+def api_ml_models():
+    """List all trained models"""
+    from .ml_service import CoinMLService
+    import json
+    from datetime import datetime, timedelta
+    
+    ml_service = CoinMLService(binance)
+    models = []
+    
+    try:
+        for file in os.listdir(ml_service.models_dir):
+            if file.endswith('_info.json'):
+                info_path = os.path.join(ml_service.models_dir, file)
+                with open(info_path, 'r') as f:
+                    info = json.load(f)
+                    
+                    # Check if model is stale (>7 days old)
+                    trained_at = datetime.fromisoformat(info['trained_at'])
+                    days_old = (datetime.now() - trained_at).days
+                    info['days_old'] = days_old
+                    info['is_stale'] = days_old > 7
+                    
+                    models.append(info)
+    except:
+        pass
+    
+    return {'models': models}
+
+
+@app.post('/api/ml/auto-retrain')
+def api_ml_auto_retrain(db: Session = Depends(get_db)):
+    """
+    Auto-retrain models for all holdings
+    - Only retrains if model is >7 days old or doesn't exist
+    - Runs in background
+    """
+    from .ml_service import CoinMLService
+    import threading
+    
+    # Get all unique assets from portfolio
+    try:
+        account = binance.client.get_account()
+        holdings = []
+        for balance in account['balances']:
+            free = float(balance['free'])
+            locked = float(balance['locked'])
+            total = free + locked
+            
+            if total > 0 and balance['asset'] != 'USDT':
+                symbol = balance['asset'] + 'USDT'
+                holdings.append(symbol)
+    except:
+        return {'error': 'Failed to fetch portfolio'}
+    
+    ml_service = CoinMLService(binance)
+    retrained = []
+    skipped = []
+    
+    for symbol in holdings:
+        # Check if model exists and is fresh
+        info_path = os.path.join(ml_service.models_dir, f'{symbol}_info.json')
+        
+        needs_training = True
+        if os.path.exists(info_path):
+            try:
+                with open(info_path, 'r') as f:
+                    info = json.load(f)
+                    trained_at = datetime.fromisoformat(info['trained_at'])
+                    days_old = (datetime.now() - trained_at).days
+                    
+                    if days_old <= 7:
+                        needs_training = False
+                        skipped.append(f"{symbol} (trained {days_old}d ago)")
+            except:
+                pass
+        
+        if needs_training:
+            # Train in background
+            def train_bg(sym):
+                ml = CoinMLService(binance)
+                result = ml.train_model(sym, days=365)
+                print(f"[ML Auto-Retrain] {sym}: {result.get('test_accuracy', 0):.2%}")
+            
+            thread = threading.Thread(target=train_bg, args=(symbol,), daemon=True)
+            thread.start()
+            retrained.append(symbol)
+    
+    return {
+        'ok': True,
+        'retrained': retrained,
+        'skipped': skipped,
+        'message': f'Training {len(retrained)} models in background'
+    }
+
+
+# ==================== WATCHLIST ENDPOINTS ====================
+
+@app.get('/api/watchlist')
+def api_watchlist_get(db: Session = Depends(get_db)):
+    """Get all watchlist coins"""
+    from .models import Watchlist
+    
+    watchlist = db.query(Watchlist).filter(Watchlist.enabled == True).all()
+    
+    return {
+        'watchlist': [{
+            'id': w.id,
+            'symbol': w.symbol,
+            'asset': w.asset,
+            'added_at': w.added_at.isoformat() if w.added_at else None,
+            'reason_added': w.reason_added,
+            'buy_trigger_score': w.buy_trigger_score,
+            'max_buy_usdt': w.max_buy_usdt,
+            'last_checked_at': w.last_checked_at.isoformat() if w.last_checked_at else None
+        } for w in watchlist]
+    }
+
+
+@app.post('/api/watchlist/add')
+def api_watchlist_add(symbol: str, max_buy_usdt: float = 50.0, buy_trigger_score: int = 70, db: Session = Depends(get_db)):
+    """Add a coin to watchlist"""
+    from .models import Watchlist
+    
+    # Extract asset from symbol
+    asset = symbol.replace('USDT', '')
+    
+    # Check if already exists
+    existing = db.query(Watchlist).filter(Watchlist.symbol == symbol).first()
+    if existing:
+        existing.enabled = True
+        existing.max_buy_usdt = max_buy_usdt
+        existing.buy_trigger_score = buy_trigger_score
+        db.commit()
+        return {'ok': True, 'message': f'{symbol} re-enabled in watchlist'}
+    
+    # Add new
+    watchlist_item = Watchlist(
+        symbol=symbol,
+        asset=asset,
+        reason_added='Manual add',
+        max_buy_usdt=max_buy_usdt,
+        buy_trigger_score=buy_trigger_score
+    )
+    db.add(watchlist_item)
+    db.commit()
+    
+    return {'ok': True, 'message': f'{symbol} added to watchlist'}
+
+
+@app.delete('/api/watchlist/{symbol}')
+def api_watchlist_remove(symbol: str, db: Session = Depends(get_db)):
+    """Remove a coin from watchlist"""
+    from .models import Watchlist
+    
+    watchlist_item = db.query(Watchlist).filter(Watchlist.symbol == symbol).first()
+    if watchlist_item:
+        watchlist_item.enabled = False
+        db.commit()
+        return {'ok': True, 'message': f'{symbol} removed from watchlist'}
+    
+    return {'error': 'Symbol not found in watchlist'}
 
 
