@@ -1,0 +1,311 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TradingBot v2</title>
+    <style>
+        :root {
+            --bg: #0b1220;
+            --card: #0f172a;
+            --muted: #8aa0c9;
+            --text: #e6ebf5;
+            --ok: #22c55e;
+            --bad: #ef4444;
+            --accent: #60a5fa;
+        }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        }
+
+        .wrap {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        h1 {
+            margin: 0 0 16px;
+            font-size: 24px;
+            letter-spacing: -0.02em;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 16px;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 14px;
+        }
+
+        .kpis {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+
+        .kpi {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 10px;
+            padding: 10px;
+        }
+
+        .kpi .l {
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .kpi .v {
+            font-size: 20px;
+            font-weight: 700;
+            margin-top: 4px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            padding: 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            font-size: 14px;
+        }
+
+        th {
+            text-align: left;
+            color: var(--muted);
+            font-weight: 600;
+        }
+
+        a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .pill {
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 700;
+            display: inline-block;
+            border: 1px solid;
+        }
+
+        .BUY {
+            background: rgba(34, 197, 94, 0.15);
+            color: #88f7b8;
+            border-color: rgba(34, 197, 94, 0.4);
+        }
+
+        .SELL {
+            background: rgba(239, 68, 68, 0.15);
+            color: #ffb3b3;
+            border-color: rgba(239, 68, 68, 0.4);
+        }
+
+        .HOLD {
+            background: rgba(96, 165, 250, 0.15);
+            color: #b9d8ff;
+            border-color: rgba(96, 165, 250, 0.4);
+        }
+
+        .trend {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+        }
+
+        .trend .row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 10px;
+            padding: 8px 10px;
+        }
+
+        .muted {
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .chat {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .chat input {
+            flex: 1;
+            padding: 10px;
+            background: #0b1327;
+            color: var(--text);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 8px;
+        }
+
+        .chat button {
+            background: #2563eb;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 10px 14px;
+            cursor: pointer;
+        }
+
+        .resp {
+            margin-top: 8px;
+            font-size: 14px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrap">
+        <h1>TradingBot v2</h1>
+        <div class="grid">
+            <div class="card">
+                <div class="kpis">
+                    <div class="kpi">
+                        <div class="l">USDT Free</div>
+                        <div class="v" id="usdt_free">—</div>
+                    </div>
+                    <div class="kpi">
+                        <div class="l">USDT Locked</div>
+                        <div class="v" id="usdt_locked">—</div>
+                    </div>
+                    <div class="kpi">
+                        <div class="l">Open Positions</div>
+                        <div class="v" id="open_positions">—</div>
+                    </div>
+                    <div class="kpi">
+                        <div class="l">Trades</div>
+                        <div class="v" id="trades">—</div>
+                    </div>
+                </div>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-top:12px;">
+                    <div class="card" style="padding:0;">
+                        <div style="padding:10px; border-bottom:1px solid rgba(255,255,255,0.06);" class="muted">AI
+                            Signals</div>
+                        <div style="padding:10px; max-height:320px; overflow:auto;">
+                            <table id="signals_tbl">
+                                <thead>
+                                    <tr>
+                                        <th>Symbol</th>
+                                        <th>Action</th>
+                                        <th>Conf</th>
+                                        <th>When</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="card" style="padding:0;">
+                        <div style="padding:10px; border-bottom:1px solid rgba(255,255,255,0.06);" class="muted">
+                            Trending (6h)</div>
+                        <div style="padding:10px;">
+                            <div class="trend" id="trending"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="card" style="padding:0;">
+                <div style="padding:10px; border-bottom:1px solid rgba(255,255,255,0.06);" class="muted">Assistant</div>
+                <div style="padding:10px;">
+                    <div class="chat">
+                        <input id="chat_q" placeholder="Ask about portfolio, trending, or say: verify buy BTCUSDT 25" />
+                        <button onclick="sendChat()">Ask</button>
+                    </div>
+                    <div class="resp" id="chat_resp" class="muted">Type a question to the bot.</div>
+                </div>
+                <div style="padding:10px; border-top:1px solid rgba(255,255,255,0.06);" class="muted">Latest News</div>
+                <div style="padding:10px; max-height:300px; overflow:auto;">
+                    <table id="news_tbl">
+                        <thead>
+                            <tr>
+                                <th>Title</th>
+                                <th>Tickers</th>
+                                <th>Sentiment</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function fetchJSON(url, opts) { const r = await fetch(url, opts); return r.json(); }
+        function fmtTime(s) { if (!s) return ''; const d = new Date(s); return d.toLocaleString(); }
+
+        async function loadOverview() {
+            const o = await fetchJSON('/api/overview');
+            document.getElementById('usdt_free').textContent = '$' + (o.usdt_free || 0).toFixed?.(2) || o.usdt_free;
+            document.getElementById('usdt_locked').textContent = '$' + (o.usdt_locked || 0).toFixed?.(2) || o.usdt_locked;
+            document.getElementById('open_positions').textContent = o.open_positions ?? '—';
+            document.getElementById('trades').textContent = o.trades_total ?? '—';
+        }
+        async function loadSignals() {
+            const list = await fetchJSON('/api/signals');
+            const tbody = document.querySelector('#signals_tbl tbody');
+            tbody.innerHTML = list.map(s => `
+          <tr>
+            <td>${s.symbol}</td>
+            <td><span class="pill ${s.action}">${s.action}</span></td>
+            <td>${s.confidence ?? ''}</td>
+            <td class="muted">${fmtTime(s.created_at)}</td>
+          </tr>
+        `).join('');
+        }
+        async function loadTrending() {
+            const items = await fetchJSON('/api/trending');
+            document.getElementById('trending').innerHTML = items.map(t => `
+          <div class="row"><div><strong>${t.ticker}</strong> <span class="muted">${t.mentions} mentions</span></div><div>${t.score >= 0 ? '+' : ''}${t.score}</div></div>
+        `).join('');
+        }
+        async function loadNews() {
+            const items = await fetchJSON('/api/news');
+            const tbody = document.querySelector('#news_tbl tbody');
+            tbody.innerHTML = items.map(n => `
+          <tr>
+            <td><a href="${n.url}" target="_blank">${n.title}</a></td>
+            <td>${n.tickers || ''}</td>
+            <td>${n.sentiment || ''}</td>
+          </tr>
+        `).join('');
+        }
+        async function sendChat() {
+            const q = document.getElementById('chat_q').value.trim();
+            if (!q) return;
+            const res = await fetchJSON('/api/chat?q=' + encodeURIComponent(q), { method: 'POST' });
+            const out = [];
+            if (res.text) { out.push(res.text); }
+            if (res.result) { out.push('\n' + JSON.stringify(res.result)); }
+            document.getElementById('chat_resp').textContent = out.join('\n');
+        }
+
+        loadOverview(); loadSignals(); loadTrending(); loadNews();
+        setInterval(loadOverview, 8000);
+        setInterval(loadSignals, 10000);
+        setInterval(loadTrending, 30000);
+        setInterval(loadNews, 60000);
+    </script>
+</body>
+
+</html>

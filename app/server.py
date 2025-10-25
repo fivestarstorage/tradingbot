@@ -11,6 +11,8 @@ from .models import NewsArticle, Signal, Position, Trade
 from .news_service import fetch_and_store_news
 from .ai_decider import AIDecider
 from .trading_service import TradingService
+from .trending_service import compute_trending
+from .chat_service import ChatService
 from core.binance_client import BinanceClient
 
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), '..', 'templates'))
@@ -31,6 +33,7 @@ binance = BinanceClient(
 )
 trade_service = TradingService(binance)
 ai_decider = AIDecider()
+chat_service = ChatService(binance, trade_service)
 
 
 @app.get('/', response_class=HTMLResponse)
@@ -39,12 +42,14 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     latest_signals = db.query(Signal).order_by(Signal.created_at.desc()).limit(20).all()
     open_positions = db.query(Position).filter(Position.status == 'OPEN').all()
     recent_trades = db.query(Trade).order_by(Trade.created_at.desc()).limit(20).all()
-    return templates.TemplateResponse('advanced_dashboard.html', {
+    trending = compute_trending(db, hours=6, limit=10)
+    return templates.TemplateResponse('dashboard.html', {
         'request': request,
         'news': latest_news,
         'signals': latest_signals,
         'positions': open_positions,
-        'trades': recent_trades
+        'trades': recent_trades,
+        'trending': trending
     })
 
 
@@ -75,6 +80,11 @@ def api_signals(db: Session = Depends(get_db)):
             'created_at': s.created_at.isoformat()
         } for s in sigs
     ]
+
+
+@app.get('/api/trending')
+def api_trending(hours: int = 6, limit: int = 15, db: Session = Depends(get_db)):
+    return compute_trending(db, hours=hours, limit=limit)
 
 
 @app.get('/api/overview')
@@ -182,6 +192,11 @@ def api_sell(symbol: str, quantity: float, db: Session = Depends(get_db)):
     return {'ok': trade is not None, 'trade_id': trade.id if trade else None}
 
 
+@app.post('/api/chat')
+def api_chat(q: str, db: Session = Depends(get_db)):
+    return chat_service.handle(db, q)
+
+
 def scheduled_job():
     from .db import SessionLocal
     db = SessionLocal()
@@ -190,8 +205,28 @@ def scheduled_job():
         if api_key:
             fetch_and_store_news(db, api_key)
         # decide on a default watchlist
-        symbols = os.getenv('WATCHLIST', 'BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT').split(',')
-        ai_decider.decide(db, [s.strip().upper() for s in symbols])
+        symbols = [s.strip().upper() for s in os.getenv('WATCHLIST', 'BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT').split(',')]
+        signals = ai_decider.decide(db, symbols)
+        # auto-trade policy: execute only if AUTO_TRADE=true and confidence >= threshold
+        if os.getenv('AUTO_TRADE', 'false').lower() == 'true':
+            threshold = int(os.getenv('AUTO_TRADE_CONFIDENCE', '75'))
+            per_trade_usdt = float(os.getenv('AUTO_TRADE_USDT', '25'))
+            for s in signals:
+                if not s.symbol or s.confidence is None:
+                    continue
+                if s.confidence < threshold:
+                    continue
+                if s.action == 'BUY':
+                    check = trade_service.verify_buy(s.symbol, per_trade_usdt)
+                    if check['has_funds'] and check['is_tradeable'] and check['symbol_ok']:
+                        trade_service.buy_market(db, s.symbol, per_trade_usdt)
+                elif s.action == 'SELL':
+                    # sell full available asset (simple policy)
+                    asset = s.symbol.replace('USDT', '')
+                    bal = binance.get_account_balance(asset) or {'free': 0.0}
+                    qty = float(bal.get('free', 0.0))
+                    if qty > 0:
+                        trade_service.sell_market(db, s.symbol, qty)
     finally:
         db.close()
 
