@@ -965,6 +965,26 @@ def api_momentum_scan(db: Session = Depends(get_db)):
     }
 
 
+@app.delete('/api/momentum/signal/{signal_id}')
+def api_momentum_delete_signal(signal_id: int, db: Session = Depends(get_db)):
+    """Delete/dismiss a momentum signal"""
+    from .models import MomentumSignal
+    
+    signal = db.query(MomentumSignal).filter(MomentumSignal.id == signal_id).first()
+    
+    if not signal:
+        raise HTTPException(status_code=404, detail="Signal not found")
+    
+    # Mark as dismissed instead of deleting from DB
+    signal.status = 'DISMISSED'
+    db.commit()
+    
+    return {
+        'ok': True,
+        'message': f'Signal {signal.symbol} dismissed'
+    }
+
+
 @app.post('/api/momentum/trade/{signal_id}')
 def api_momentum_execute_trade(signal_id: int, db: Session = Depends(get_db)):
     """Execute a trade for a specific signal"""

@@ -134,6 +134,16 @@ class MomentumTradingService:
                     debug_info['price_filtered'] += 1
                     continue
                 
+                # Check if signal already exists for this symbol
+                existing_signal = db.query(MomentumSignal).filter(
+                    MomentumSignal.symbol == symbol,
+                    MomentumSignal.status == 'ACTIVE'
+                ).first()
+                
+                if existing_signal:
+                    # Skip - already have an active signal for this coin
+                    continue
+                
                 # Log coins that pass initial filters
                 print(f"[Momentum] 🔍 {symbol}: +{price_change:.2f}% (${volume_24h:,.0f} vol) - Analyzing...")
                 
@@ -145,14 +155,17 @@ class MomentumTradingService:
                         'status': 'analyzing'
                     })
                 
-                # Check each interval
+                # Check each interval (but stop after first signal created)
+                signal_created = False
                 for interval in self.config['intervals']:
                     signal, fail_reason = self._analyze_symbol(db, symbol, interval, ticker, return_reason=True)
                     if signal:
                         print(f"[Momentum] ✅ SIGNAL: {symbol} +{signal.price_change_pct:.2f}% (AI: {signal.ai_confidence:.0%})")
                         signals.append(signal)
+                        signal_created = True
                         if return_debug and debug_info['candidates']:
                             debug_info['candidates'][-1]['status'] = 'signal_created'
+                        break  # Don't create duplicate signals for other intervals
                     elif fail_reason and return_debug and debug_info['candidates']:
                         debug_info['candidates'][-1]['status'] = 'failed'
                         debug_info['candidates'][-1]['reason'] = fail_reason
