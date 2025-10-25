@@ -18,6 +18,7 @@ from .chat_service import ChatService
 from core.binance_client import BinanceClient
 import subprocess
 from typing import Optional, Dict, Any
+import json
 
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), '..', 'templates'))
 
@@ -94,9 +95,9 @@ def api_news(db: Session = Depends(get_db)):
             'url': n.news_url,
             'sentiment': n.sentiment,
             'tickers': n.tickers,
-            # normalize to explicit UTC (Z) so frontend can convert to local tz reliably
+            # Dates are stored as naive UTC in DB, add Z suffix to indicate UTC
             'date': (
-                (n.date.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z'))
+                (n.date.replace(tzinfo=timezone.utc).isoformat().replace('+00:00', 'Z'))
                 if n.date else None
             ),
             'ingested_at': (
@@ -321,6 +322,65 @@ def api_ai_summary(window_minutes: int = 90, db: Session = Depends(get_db)):
     }
 
 
+@app.get('/api/ai/insight')
+def api_ai_insight(db: Session = Depends(get_db)):
+    """Get the latest AI-generated market insight."""
+    # Get most recent insight from bot logs
+    latest_insight = db.query(BotLog).filter(
+        BotLog.category == 'INSIGHT'
+    ).order_by(BotLog.created_at.desc()).first()
+    
+    if latest_insight:
+        try:
+            insight_data = json.loads(latest_insight.message)
+            return {
+                'insight': insight_data.get('insight'),
+                'recommendation': insight_data.get('recommendation'),
+                'confidence': insight_data.get('confidence'),
+                'generated_at': latest_insight.created_at.isoformat()
+            }
+        except:
+            pass
+    
+    return {
+        'insight': 'No insights generated yet. Wait for next scheduled run.',
+        'recommendation': 'Monitor market conditions',
+        'confidence': 0,
+        'generated_at': None
+    }
+
+
+@app.get('/api/portfolio/recommendations')
+def api_portfolio_recommendations(db: Session = Depends(get_db)):
+    """Get latest portfolio management recommendations."""
+    # Get recent portfolio logs
+    logs = db.query(BotLog).filter(
+        BotLog.category == 'PORTFOLIO'
+    ).order_by(BotLog.created_at.desc()).limit(10).all()
+    
+    recommendations = []
+    for log in logs:
+        # Parse the log message
+        # Format: "Portfolio: SYMBOL - ACTION (confidence%) - reasoning"
+        try:
+            parts = log.message.split(' - ')
+            if len(parts) >= 3:
+                symbol_part = parts[0].replace('Portfolio: ', '')
+                action_part = parts[1]
+                reasoning = parts[2]
+                
+                recommendations.append({
+                    'symbol': symbol_part,
+                    'action': action_part.split('(')[0].strip(),
+                    'reasoning': reasoning,
+                    'timestamp': log.created_at.isoformat()
+                })
+        except:
+            continue
+    
+    return recommendations
+
+
 @app.get('/api/git/status')
 def api_git_status():
     # Stub: not wired to system git; return static OK to avoid 404 noise
@@ -459,6 +519,9 @@ def api_deploy_webhook(x_deploy_token: str | None = Header(None)):
 
 def scheduled_job():
     from .db import SessionLocal
+    from .portfolio_manager import PortfolioManager
+    import openai
+    
     db = SessionLocal()
     try:
         run = SchedulerRun()
@@ -469,16 +532,91 @@ def scheduled_job():
             run.notes = f"updated={stats.get('updated',0)}"
             run.skipped = stats.get('skipped', 0)
             run.total = stats.get('total', 0)
-        # decide on a default watchlist
+        
+        # Decide on watchlist (new coins to potentially buy)
         symbols = [s.strip().upper() for s in os.getenv('WATCHLIST', 'BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT').split(',')]
         signals = ai_decider.decide(db, symbols)
-        # log AI decisions
+        
+        # Log AI decisions
         for s in signals:
             try:
-                msg = f"AI: {s.symbol} {s.action} ({s.confidence}%)"
+                msg = f"AI Signal: {s.symbol} {s.action} ({s.confidence}%)"
                 db.add(BotLog(level='INFO', category='AI', message=msg))
             except Exception:
                 pass
+        run.signals = len(signals)
+        
+        # Portfolio Management - analyze existing holdings
+        portfolio_mgr = PortfolioManager(binance)
+        portfolio_auto = os.getenv('PORTFOLIO_AUTO_MANAGE', 'false').lower() == 'true'
+        portfolio_recommendations = portfolio_mgr.manage_portfolio(db, auto_execute=portfolio_auto)
+        
+        # Generate AI insights summary
+        try:
+            openai.api_key = os.getenv('OPENAI_API_KEY')
+            
+            # Get recent sentiment
+            total_news = run.total or 0
+            pos_news = len([s for s in signals if s.confidence and s.confidence > 70 and s.action == 'BUY'])
+            neg_news = len([s for s in signals if s.confidence and s.confidence > 70 and s.action == 'SELL'])
+            
+            # Format signals
+            signal_summary = "\n".join([
+                f"- {s.symbol}: {s.action} ({s.confidence}%) - {(s.reasoning or '')[:100]}"
+                for s in signals[:5]
+            ])
+            
+            # Format portfolio recommendations
+            portfolio_summary = "\n".join([
+                f"- {r['symbol']}: {r['action']} ({r['confidence']}%) - {r['reasoning'][:100]}"
+                for r in portfolio_recommendations[:5]
+            ]) if portfolio_recommendations else "No holdings to manage"
+            
+            insight_prompt = f"""You are a crypto trading analyst. Generate a brief market insight and recommendation.
+
+Market Data (last 5 mins):
+- News articles processed: {total_news}
+- Bullish signals: {pos_news}
+- Bearish signals: {neg_news}
+
+Top Signals (New Opportunities):
+{signal_summary or 'No strong signals'}
+
+Portfolio Management:
+{portfolio_summary}
+
+Provide a concise insight (2-3 sentences) and a specific action recommendation.
+Format:
+{{
+  "insight": "Brief market summary",
+  "recommendation": "Specific action to take",
+  "confidence": 0-100
+}}
+"""
+            
+            response = openai.chat.completions.create(
+                model='gpt-4o-mini',
+                messages=[
+                    {"role": "system", "content": "You are a concise crypto market analyst."},
+                    {"role": "user", "content": insight_prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.4
+            )
+            
+            insight = json.loads(response.choices[0].message.content)
+            run.notes = f"{run.notes or ''} | AI: {insight.get('recommendation', 'No recommendation')}"
+            
+            # Store insight separately for dashboard
+            db.add(BotLog(
+                level='INFO',
+                category='INSIGHT',
+                message=json.dumps(insight)
+            ))
+            
+        except Exception as e:
+            print(f"Error generating insights: {e}")
+        
         run.signals = len(signals)
         # quick sentiment snapshot
         total = db.query(func.count(NewsArticle.id)).scalar() or 0

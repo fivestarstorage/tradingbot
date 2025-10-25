@@ -13,10 +13,15 @@ CRYPTO_NEWS_URL = os.getenv(
 def parse_date(date_str: str):
     try:
         # Example: Fri, 24 Oct 2025 22:30:41 -0400
-        return datetime.strptime(date_str, '%a, %d %b %Y %H:%M:%S %z')
+        # Parse with timezone, then convert to UTC and make naive for consistent DB storage
+        dt = datetime.strptime(date_str, '%a, %d %b %Y %H:%M:%S %z')
+        # Convert to UTC and strip timezone (SQLite loses tz info anyway)
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
     except Exception:
         try:
-            return datetime.fromisoformat(date_str)
+            # Fallback for ISO format
+            dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+            return dt.astimezone(timezone.utc).replace(tzinfo=None)
         except Exception:
             return None
 
