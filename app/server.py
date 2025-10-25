@@ -6,6 +6,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from apscheduler.schedulers.background import BackgroundScheduler
+from pydantic import BaseModel
 from .db import Base, engine, get_db
 from .models import NewsArticle, Signal, Position, Trade, SchedulerRun, BotLog
 from datetime import timezone
@@ -495,21 +496,29 @@ def api_decide(symbols: str, db: Session = Depends(get_db)):
     return {'count': len(signals)}
 
 
+class BuyRequest(BaseModel):
+    symbol: str
+    usdt_amount: float
+
+class SellRequest(BaseModel):
+    symbol: str
+    quantity: float
+
 @app.post('/api/trade/buy')
-def api_buy(symbol: str, usdt: float, db: Session = Depends(get_db)):
-    check = trade_service.verify_buy(symbol.upper(), usdt)
+def api_buy(request: BuyRequest, db: Session = Depends(get_db)):
+    check = trade_service.verify_buy(request.symbol.upper(), request.usdt_amount)
     if not (check['has_funds'] and check['is_tradeable'] and check['symbol_ok']):
         return {'ok': False, 'verify': check}
-    trade = trade_service.buy_market(db, symbol.upper(), usdt)
+    trade = trade_service.buy_market(db, request.symbol.upper(), request.usdt_amount)
     return {'ok': trade is not None, 'trade_id': trade.id if trade else None}
 
 
 @app.post('/api/trade/sell')
-def api_sell(symbol: str, quantity: float, db: Session = Depends(get_db)):
-    check = trade_service.verify_sell(symbol.upper())
+def api_sell(request: SellRequest, db: Session = Depends(get_db)):
+    check = trade_service.verify_sell(request.symbol.upper())
     if not check['has_asset']:
         return {'ok': False, 'verify': check}
-    trade = trade_service.sell_market(db, symbol.upper(), quantity)
+    trade = trade_service.sell_market(db, request.symbol.upper(), request.quantity)
     return {'ok': trade is not None, 'trade_id': trade.id if trade else None}
 
 
