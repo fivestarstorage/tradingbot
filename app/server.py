@@ -483,6 +483,18 @@ def scheduled_job():
                             db.add(BotLog(level='INFO', category='TRADE', message=f"SELL {s.symbol} qty={qty}"))
                         except Exception:
                             pass
+        # compose run summary notes for dashboard
+        try:
+            top_tr = compute_trending(db, hours=6, limit=1)
+            top_line = ''
+            if top_tr:
+                tt = top_tr[0]
+                top_line = f"Top trending: {tt['ticker']} (score {tt['score']}, pos {tt['positive']}/neg {tt['negative']})"
+            sig_line = f"Signals: {run.signals}, Buys: {run.buys}, Sells: {run.sells}"
+            upd = run.notes or ''
+            run.notes = ' | '.join([x for x in [upd, top_line, sig_line] if x])
+        except Exception:
+            pass
         db.add(run)
         db.commit()
     finally:

@@ -43,7 +43,8 @@ def fetch_and_store_news(db: Session, api_key: str):
             changed = False
             # update date if not set
             new_dt = parse_date(item.get('date'))
-            if new_dt and (not existing.date):
+            # Always normalize stored date from raw if available
+            if new_dt and (not existing.date or existing.date != new_dt):
                 existing.date = new_dt
                 changed = True
             # update sentiment/title/text/tickers if changed
