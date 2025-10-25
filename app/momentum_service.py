@@ -93,9 +93,18 @@ class MomentumTradingService:
             }
         }
     
-    def scan_for_signals(self, db: Session) -> List[MomentumSignal]:
+    def scan_for_signals(self, db: Session, return_debug=False):
         """Scan market for momentum signals"""
         signals = []
+        debug_info = {
+            'checked': 0,
+            'volume_filtered': 0,
+            'price_filtered': 0,
+            'spread_filtered': 0,
+            'volume_spike_filtered': 0,
+            'ai_filtered': 0,
+            'candidates': []
+        }
         
         try:
             # Get all USDT pairs
@@ -104,9 +113,6 @@ class MomentumTradingService:
             print(f"\n[Momentum] Starting scan of {len(tickers)} pairs...")
             print(f"[Momentum] Config: min_price={self.config['min_price_change_pct']}%, min_vol=${self.config['min_volume_24h']:,.0f}")
             
-            checked = 0
-            volume_filtered = 0
-            
             for ticker in tickers:
                 symbol = ticker['symbol']
                 
@@ -114,44 +120,72 @@ class MomentumTradingService:
                 if not symbol.endswith('USDT'):
                     continue
                 
-                checked += 1
+                debug_info['checked'] += 1
                 
                 # Filter: Minimum volume
                 volume_24h = float(ticker.get('quoteVolume', 0))
                 if volume_24h < self.config['min_volume_24h']:
-                    volume_filtered += 1
+                    debug_info['volume_filtered'] += 1
                     continue
                 
-                # Log coins that pass volume filter
+                # Check price change
                 price_change = float(ticker.get('priceChangePercent', 0))
-                if price_change >= self.config['min_price_change_pct']:
-                    print(f"[Momentum] 🔍 {symbol}: +{price_change:.2f}% (${volume_24h:,.0f} vol) - Analyzing...")
+                if price_change < self.config['min_price_change_pct']:
+                    debug_info['price_filtered'] += 1
+                    continue
+                
+                # Log coins that pass initial filters
+                print(f"[Momentum] 🔍 {symbol}: +{price_change:.2f}% (${volume_24h:,.0f} vol) - Analyzing...")
+                
+                if return_debug:
+                    debug_info['candidates'].append({
+                        'symbol': symbol,
+                        'price_change': price_change,
+                        'volume_24h': volume_24h,
+                        'status': 'analyzing'
+                    })
                 
                 # Check each interval
                 for interval in self.config['intervals']:
-                    signal = self._analyze_symbol(db, symbol, interval, ticker)
+                    signal, fail_reason = self._analyze_symbol(db, symbol, interval, ticker, return_reason=True)
                     if signal:
                         print(f"[Momentum] ✅ SIGNAL: {symbol} +{signal.price_change_pct:.2f}% (AI: {signal.ai_confidence:.0%})")
                         signals.append(signal)
+                        if return_debug and debug_info['candidates']:
+                            debug_info['candidates'][-1]['status'] = 'signal_created'
+                    elif fail_reason and return_debug and debug_info['candidates']:
+                        debug_info['candidates'][-1]['status'] = 'failed'
+                        debug_info['candidates'][-1]['reason'] = fail_reason
+                        if 'spread' in fail_reason.lower():
+                            debug_info['spread_filtered'] += 1
+                        elif 'volume' in fail_reason.lower():
+                            debug_info['volume_spike_filtered'] += 1
+                        elif 'ai' in fail_reason.lower() or 'confidence' in fail_reason.lower():
+                            debug_info['ai_filtered'] += 1
             
             print(f"\n[Momentum] Scan complete:")
-            print(f"  - Checked: {checked} USDT pairs")
-            print(f"  - Filtered (volume): {volume_filtered}")
+            print(f"  - Checked: {debug_info['checked']} USDT pairs")
+            print(f"  - Filtered (volume): {debug_info['volume_filtered']}")
+            print(f"  - Filtered (price): {debug_info['price_filtered']}")
             print(f"  - Signals found: {len(signals)}")
         
         except Exception as e:
             print(f"[Momentum] Error scanning for signals: {e}")
+            import traceback
+            traceback.print_exc()
         
+        if return_debug:
+            return signals, debug_info
         return signals
     
-    def _analyze_symbol(self, db: Session, symbol: str, interval: str, ticker: Dict) -> Optional[MomentumSignal]:
+    def _analyze_symbol(self, db: Session, symbol: str, interval: str, ticker: Dict, return_reason=False):
         """Analyze a symbol for momentum signal"""
         try:
             # Get recent candles
             candles = self.binance.get_klines(symbol, interval, limit=50)
             if not candles or len(candles) < 20:
                 print(f"[Momentum]   ❌ {symbol}: Not enough data")
-                return None
+                return (None, "Not enough candle data") if return_reason else None
             
             latest = candles[-1]
             current_price = float(latest['close'])
@@ -161,7 +195,7 @@ class MomentumTradingService:
             
             # Filter: Minimum price change
             if price_change_pct < self.config['min_price_change_pct']:
-                return None
+                return (None, f"Price change {price_change_pct:.2f}% below threshold") if return_reason else None
             
             # Calculate technical indicators
             technical = self._calculate_technicals(candles)
@@ -173,7 +207,7 @@ class MomentumTradingService:
             # Filter: High spread (low liquidity)
             if spread_pct > 1.0:  # > 1% spread
                 print(f"[Momentum]   ❌ {symbol}: Spread too high ({spread_pct:.2f}%)")
-                return None
+                return (None, f"Spread too high ({spread_pct:.2f}%)") if return_reason else None
             
             # Calculate volume ratio (current vs average)
             avg_volume = sum(float(c['volume']) for c in candles[:-1]) / (len(candles) - 1)
@@ -183,7 +217,7 @@ class MomentumTradingService:
             # Filter: Volume spike required
             if volume_ratio < self.config['volume_spike_ratio']:
                 print(f"[Momentum]   ❌ {symbol}: Volume not spiking ({volume_ratio:.2f}x, need {self.config['volume_spike_ratio']}x)")
-                return None
+                return (None, f"Volume not spiking ({volume_ratio:.2f}x, need {self.config['volume_spike_ratio']}x)") if return_reason else None
             
             print(f"[Momentum]   🎯 {symbol}: Passed filters! Vol spike {volume_ratio:.2f}x - Asking AI...")
             
@@ -209,7 +243,7 @@ class MomentumTradingService:
             
             # Filter: AI confidence threshold
             if ai_confidence < self.config['ai_confidence_threshold']:
-                return None
+                return (None, f"AI confidence {ai_confidence:.0%} below threshold {self.config['ai_confidence_threshold']:.0%}") if return_reason else None
             
             # Create signal
             signal = MomentumSignal(
@@ -239,11 +273,11 @@ class MomentumTradingService:
             
             print(f"✅ Signal detected: {symbol} @ {interval} | Change: {price_change_pct:.2f}% | AI: {ai_confidence:.2f}")
             
-            return signal
+            return (signal, None) if return_reason else signal
             
         except Exception as e:
             print(f"Error analyzing {symbol}: {e}")
-            return None
+            return (None, f"Error: {str(e)}") if return_reason else None
     
     def _calculate_technicals(self, candles: List[Dict]) -> Dict:
         """Calculate technical indicators"""

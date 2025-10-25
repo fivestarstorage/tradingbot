@@ -947,11 +947,11 @@ def api_momentum_trades(
 
 @app.post('/api/momentum/scan')
 def api_momentum_scan(db: Session = Depends(get_db)):
-    """Manually trigger momentum signal scan"""
+    """Manually trigger momentum signal scan with debug info"""
     from .momentum_service import MomentumTradingService
     
     momentum_service = MomentumTradingService(binance)
-    signals = momentum_service.scan_for_signals(db)
+    signals, debug_info = momentum_service.scan_for_signals(db, return_debug=True)
     
     return {
         'ok': True,
@@ -960,7 +960,8 @@ def api_momentum_scan(db: Session = Depends(get_db)):
             'symbol': s.symbol,
             'price_change_pct': s.price_change_pct,
             'ai_confidence': s.ai_confidence,
-        } for s in signals]
+        } for s in signals],
+        'debug': debug_info
     }
 
 
