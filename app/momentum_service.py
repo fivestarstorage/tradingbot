@@ -181,14 +181,26 @@ class MomentumTradingService:
     def _analyze_symbol(self, db: Session, symbol: str, interval: str, ticker: Dict, return_reason=False):
         """Analyze a symbol for momentum signal"""
         try:
-            # Get recent candles
-            candles = self.binance.get_klines(symbol, interval, limit=50)
-            if not candles or len(candles) < 20:
+            # Get recent candles (raw format: [timestamp, open, high, low, close, volume, ...])
+            raw_candles = self.binance.get_klines(symbol, interval, limit=50)
+            if not raw_candles or len(raw_candles) < 20:
                 print(f"[Momentum]   ❌ {symbol}: Not enough data")
                 return (None, "Not enough candle data") if return_reason else None
             
+            # Format candles into dict format
+            candles = []
+            for candle in raw_candles:
+                candles.append({
+                    'time': candle[0],
+                    'open': float(candle[1]),
+                    'high': float(candle[2]),
+                    'low': float(candle[3]),
+                    'close': float(candle[4]),
+                    'volume': float(candle[5])
+                })
+            
             latest = candles[-1]
-            current_price = float(latest['close'])
+            current_price = latest['close']
             
             # Calculate price change
             price_change_pct = float(ticker.get('priceChangePercent', 0))
@@ -210,8 +222,8 @@ class MomentumTradingService:
                 return (None, f"Spread too high ({spread_pct:.2f}%)") if return_reason else None
             
             # Calculate volume ratio (current vs average)
-            avg_volume = sum(float(c['volume']) for c in candles[:-1]) / (len(candles) - 1)
-            current_volume = float(latest['volume'])
+            avg_volume = sum(c['volume'] for c in candles[:-1]) / (len(candles) - 1)
+            current_volume = latest['volume']
             volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
             
             # Filter: Volume spike required
@@ -281,8 +293,8 @@ class MomentumTradingService:
     
     def _calculate_technicals(self, candles: List[Dict]) -> Dict:
         """Calculate technical indicators"""
-        closes = np.array([float(c['close']) for c in candles])
-        volumes = np.array([float(c['volume']) for c in candles])
+        closes = np.array([c['close'] for c in candles])
+        volumes = np.array([c['volume'] for c in candles])
         
         # RSI
         rsi = self._calculate_rsi(closes, period=14)
