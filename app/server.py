@@ -306,3 +306,10 @@ scheduler.add_job(scheduled_job, 'interval', minutes=5, id='news_and_decision')
 scheduler.start()
 
 
+@app.post('/api/runs/refresh')
+def api_runs_refresh():
+    # Force a news fetch + decision run now
+    scheduled_job()
+    return {'ok': True}
+
+
