@@ -22,6 +22,7 @@ class ChatService:
             'get_signals': self._get_signals,
             'get_news': self._get_news,
             'get_trending': self._get_trending,
+            'recommend_from_news': self._recommend_from_news,
             'verify_buy': self._verify_buy,
             'verify_sell': self._verify_sell,
             'buy': self._buy,
@@ -44,7 +45,7 @@ class ChatService:
             "When the user asks something, decide if a tool should be called. "
             "Respond with JSON only in the following schema: \n"
             "{\n  \"reply\": string,\n  \"tool\": string | null,\n  \"args\": object | null\n}\n"
-            "Valid tools: get_overview, get_positions, get_signals, get_news, get_trending, verify_buy, verify_sell, buy, sell.\n"
+            "Valid tools: get_overview, get_positions, get_signals, get_news, get_trending, recommend_from_news, verify_buy, verify_sell, buy, sell.\n"
             "For buy/sell/verify_* require: symbol (e.g., BTCUSDT). For buy also require usdt (number). For sell require quantity (number)."
         )
         chat = self.client.chat.completions.create(
@@ -112,6 +113,41 @@ class ChatService:
         hours = int(args.get('hours', 6))
         limit = int(args.get('limit', 10))
         return compute_trending(db, hours=hours, limit=limit)
+
+    def _recommend_from_news(self, db: Session, args: Dict[str, Any]):
+        # Pick the top trending ticker and propose an action
+        hours = int(args.get('hours', 6))
+        per_trade_usdt = float(os.getenv('AUTO_TRADE_USDT', '25'))
+        trending = compute_trending(db, hours=hours, limit=1)
+        if not trending:
+            return {'recommendation': 'HOLD', 'reason': 'No trending tickers found', 'symbol': None}
+        top = trending[0]
+        ticker = top['ticker']
+        symbol = f"{ticker}USDT"
+        # basic heuristic: positive score -> BUY, negative -> SELL/HOLD
+        if top['score'] > 0:
+            action = 'BUY'
+            confidence = min(90, 50 + top['score'] * 5)
+        elif top['score'] < 0:
+            action = 'SELL'
+            confidence = min(90, 50 + abs(top['score']) * 5)
+        else:
+            action = 'HOLD'
+            confidence = 50
+        reason = f"Top trending {ticker} with score {top['score']} (pos {top['positive']}/neg {top['negative']})."
+        # verify trade feasibility if BUY
+        verify = None
+        if action == 'BUY':
+            verify = self.trading.verify_buy(symbol, per_trade_usdt)
+        return {
+            'symbol': symbol,
+            'ticker': ticker,
+            'action': action,
+            'confidence': int(confidence),
+            'reason': reason,
+            'verify': verify,
+            'suggested_usdt': per_trade_usdt
+        }
 
     def _verify_buy(self, db: Session, args: Dict[str, Any]):
         symbol = (args.get('symbol') or '').upper()

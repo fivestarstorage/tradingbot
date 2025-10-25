@@ -236,6 +236,12 @@ def api_chat(q: str, db: Session = Depends(get_db)):
     return chat_service.handle(db, q)
 
 
+@app.get('/api/recommend')
+def api_recommend(hours: int = 6, db: Session = Depends(get_db)):
+    # Expose a direct recommendation based on latest news/trending
+    return chat_service._recommend_from_news(db, {'hours': hours})
+
+
 @app.post('/api/deploy/webhook')
 def api_deploy_webhook(x_deploy_token: str | None = Header(None)):
     secret = os.getenv('DEPLOY_TOKEN', '')
