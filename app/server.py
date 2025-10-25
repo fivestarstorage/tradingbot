@@ -31,11 +31,8 @@ from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI(title="TradingBot v2")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        os.getenv('CORS_ORIGIN', 'http://localhost:3000'),
-        os.getenv('CORS_ORIGIN_2', ''),
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],  # Allow all origins (or specify your frontend URL)
+    allow_credentials=False,  # Must be False when allow_origins is "*"
     allow_methods=["*"],
     allow_headers=["*"],
 )
