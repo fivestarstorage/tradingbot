@@ -38,7 +38,32 @@ def fetch_and_store_news(db: Session, api_key: str):
         # dedup by unique news_url
         existing = db.query(NewsArticle).filter(NewsArticle.news_url == news_url).first()
         if existing:
-            skipped += 1
+            # Upsert: update fields if missing or changed (fix stale records)
+            changed = False
+            # update date if not set
+            new_dt = parse_date(item.get('date'))
+            if new_dt and (not existing.date):
+                existing.date = new_dt
+                changed = True
+            # update sentiment/title/text/tickers if changed
+            if item.get('sentiment') and item.get('sentiment') != existing.sentiment:
+                existing.sentiment = item.get('sentiment')
+                changed = True
+            if item.get('title') and item.get('title') != existing.title:
+                existing.title = item.get('title')
+                changed = True
+            if item.get('text') and item.get('text') != existing.text:
+                existing.text = item.get('text')
+                changed = True
+            tickers = ','.join(item.get('tickers') or [])
+            if tickers and tickers != (existing.tickers or ''):
+                existing.tickers = tickers
+                changed = True
+            if changed:
+                db.add(existing)
+                inserted += 0
+            else:
+                skipped += 1
             continue
         tickers = item.get('tickers') or []
         art = NewsArticle(
