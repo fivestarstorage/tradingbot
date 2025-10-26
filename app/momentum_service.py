@@ -7,7 +7,7 @@ import os
 import time
 import json
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
 import numpy as np

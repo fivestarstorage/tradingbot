@@ -9,8 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from pydantic import BaseModel
 from .db import Base, engine, get_db
 from .models import NewsArticle, Signal, Position, Trade, SchedulerRun, BotLog
-from datetime import timezone
-import datetime
+from datetime import datetime, timezone, timedelta
 from .news_service import fetch_and_store_news
 from .ai_decider import AIDecider
 from .trading_service import TradingService
@@ -295,7 +294,7 @@ def api_insights(db: Session = Depends(get_db)):
     
     # Get unique tickers from recent news (last 24 hours)
     import datetime
-    now = datetime.datetime.utcnow()
+    now = datetime.now(timezone.utc)
     since = now - datetime.timedelta(hours=24)
     recent_news = db.query(NewsArticle).filter(NewsArticle.created_at >= since).all()
     
@@ -338,7 +337,7 @@ def api_insights(db: Session = Depends(get_db)):
 
 @app.get('/api/ai/summary')
 def api_ai_summary(window_minutes: int = 90, db: Session = Depends(get_db)):
-    now = datetime.datetime.utcnow()
+    now = datetime.now(timezone.utc)
     since = now - datetime.timedelta(minutes=window_minutes)
     # sentiment summary over recent window
     recent_news = db.query(NewsArticle).filter(NewsArticle.created_at >= since).order_by(NewsArticle.created_at.desc()).limit(100).all()
@@ -663,7 +662,6 @@ def scheduled_job():
         
         # Decide on ALL coins mentioned in recent news (not just watchlist)
         # Get all unique tickers from recent news (last 24 hours)
-        from datetime import timedelta
         recent_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         recent_news = db.query(NewsArticle).filter(
             NewsArticle.created_at >= recent_cutoff
@@ -921,7 +919,6 @@ def momentum_scanner_job():
         
         # Check active signals and expire dead ones
         from .models import MomentumSignal
-        from datetime import datetime, timedelta
         
         active_signals = db.query(MomentumSignal).filter(MomentumSignal.status == 'ACTIVE').all()
         for signal in active_signals:
@@ -1322,10 +1319,9 @@ def api_logs(
 @app.get('/api/logs/stats')
 def api_logs_stats(db: Session = Depends(get_db)):
     """Get logs statistics"""
-    from datetime import timedelta
     from sqlalchemy import func
     
-    now = datetime.datetime.utcnow()
+    now = datetime.now(timezone.utc)
     last_hour = now - timedelta(hours=1)
     last_24h = now - timedelta(hours=24)
     
@@ -1376,9 +1372,8 @@ def api_logs_stats(db: Session = Depends(get_db)):
 @app.delete('/api/logs/clear')
 def api_logs_clear(older_than_days: int = 7, db: Session = Depends(get_db)):
     """Clear old logs"""
-    from datetime import timedelta
     
-    cutoff = datetime.datetime.utcnow() - timedelta(days=older_than_days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
     
     deleted = db.query(BotLog).filter(BotLog.created_at < cutoff).delete()
     db.commit()
@@ -1431,7 +1426,6 @@ def api_ml_models():
     """List all trained models"""
     from .ml_service import CoinMLService
     import json
-    from datetime import datetime, timedelta
     
     ml_service = CoinMLService(binance)
     models = []

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from collections import Counter, defaultdict
 from sqlalchemy.orm import Session
 from .models import NewsArticle
