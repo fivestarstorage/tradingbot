@@ -41,26 +41,33 @@ class AIDecider:
 
         decisions = []
         if self.client is not None:
-            user_msg = {
-                'role': 'user',
-                'content': (
-                    "Symbols: " + ", ".join(symbols) + "\n" +
-                    "News JSON: " + str(items) + "\n" +
-                    "Return a JSON list with objects {symbol, action, confidence, reasoning, ref_url}."
-                )
-            }
-
-            chat = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{'role': 'system', 'content': SYSTEM_PROMPT}, user_msg],
-                temperature=0.2
-            )
-            content = chat.choices[0].message.content
-
             try:
-                import json
-                decisions = json.loads(content)
-            except Exception:
+                user_msg = {
+                    'role': 'user',
+                    'content': (
+                        "Symbols: " + ", ".join(symbols) + "\n" +
+                        "News JSON: " + str(items) + "\n" +
+                        "Return a JSON list with objects {symbol, action, confidence, reasoning, ref_url}."
+                    )
+                }
+
+                chat = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[{'role': 'system', 'content': SYSTEM_PROMPT}, user_msg],
+                    temperature=0.2
+                )
+                content = chat.choices[0].message.content
+
+                try:
+                    import json
+                    decisions = json.loads(content)
+                    print(f"[AI Decider] OpenAI returned {len(decisions)} decisions")
+                except Exception as e:
+                    print(f"[AI Decider] Failed to parse OpenAI response: {e}")
+                    print(f"[AI Decider] Raw content: {content[:500]}")
+                    decisions = []
+            except Exception as e:
+                print(f"[AI Decider] OpenAI API call failed: {e}")
                 decisions = []
         else:
             # Fallback heuristic without OpenAI: majority sentiment per symbol
@@ -82,14 +89,28 @@ class AIDecider:
                 action = 'HOLD'
                 confidence = 50
                 reasoning = 'Mixed or insufficient sentiment (fallback)'
-                if c['pos'] >= 3 and c['neg'] == 0:
+                if c['pos'] >= 2 and c['neg'] == 0:
                     action = 'BUY'
                     confidence = 70
                     reasoning = f"Positive news count {c['pos']} with no negatives (fallback)"
-                elif c['neg'] >= 3 and c['pos'] == 0:
+                elif c['neg'] >= 2 and c['pos'] == 0:
                     action = 'SELL'
                     confidence = 70
                     reasoning = f"Negative news count {c['neg']} with no positives (fallback)"
+                elif c['pos'] > c['neg'] and c['pos'] >= 2:
+                    action = 'BUY'
+                    confidence = 60
+                    reasoning = f"More positive ({c['pos']}) than negative ({c['neg']}) news"
+                elif c['neg'] > c['pos'] and c['neg'] >= 2:
+                    action = 'SELL'
+                    confidence = 60
+                    reasoning = f"More negative ({c['neg']}) than positive ({c['pos']}) news"
+                elif c['pos'] > 0 or c['neg'] > 0:
+                    # Generate HOLD signal if there's ANY news, even if it doesn't meet thresholds
+                    reasoning = f"News sentiment: {c['pos']} positive, {c['neg']} negative (fallback HOLD)"
+                    confidence = 55
+                
+                print(f"[AI Decider] Fallback decision for {s}: {action} ({confidence}%) - {reasoning}")
                 decisions.append({
                     'symbol': s,
                     'action': action,

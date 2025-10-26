@@ -330,13 +330,22 @@ def scrape_cointelegraph_rss():
 
 
 def fetch_and_store_news(db: Session, api_key: str):
-    # Fetch from crypto news API
-    params = { 'token': api_key }
-    resp = requests.get(CRYPTO_NEWS_URL, params=params, timeout=20)
-    resp.raise_for_status()
-    payload = resp.json()
-
-    items = payload.get('data', [])
+    items = []
+    
+    # Fetch from crypto news API (only if key is provided)
+    if api_key and api_key.strip():
+        try:
+            params = { 'token': api_key }
+            resp = requests.get(CRYPTO_NEWS_URL, params=params, timeout=20)
+            resp.raise_for_status()
+            payload = resp.json()
+            items = payload.get('data', [])
+            print(f"[News] Fetched {len(items)} from CryptoNews API")
+        except Exception as e:
+            print(f"[News] CryptoNews API error (skipping): {e}")
+            items = []
+    else:
+        print("[News] CryptoNews API key not set, skipping...")
     
     # Also fetch from CoinDesk
     coindesk_items = scrape_coindesk_news()

@@ -155,30 +155,7 @@ def api_overview(db: Session = Depends(get_db)):
     }
 
 
-@app.get('/api/logs')
-def api_logs(limit: int = Query(200, ge=1, le=1000), db: Session = Depends(get_db)):
-    sigs = db.query(Signal).order_by(Signal.created_at.desc()).limit(limit).all()
-    trs = db.query(Trade).order_by(Trade.created_at.desc()).limit(limit).all()
-    bl = db.query(BotLog).order_by(BotLog.created_at.desc()).limit(limit).all()
-    sig_entries = [{
-        'type': 'signal',
-        'created_at': s.created_at.isoformat(),
-        'message': f"{s.symbol} {s.action} ({s.confidence}%) - {s.reasoning[:120] if s.reasoning else ''}"
-    } for s in sigs]
-    tr_entries = [{
-        'type': 'trade',
-        'created_at': t.created_at.isoformat(),
-        'message': f"{t.side} {t.symbol} qty={t.quantity:.6f} @ {t.price:.4f} (${t.notional:.2f})"
-    } for t in trs]
-    ai_entries = [{
-        'type': l.category.lower(),
-        'created_at': l.created_at.isoformat(),
-        'message': l.message
-    } for l in bl]
-    # Merge and sort by time desc
-    merged = sig_entries + tr_entries + ai_entries
-    merged.sort(key=lambda x: x['created_at'], reverse=True)
-    return merged[:limit]
+# Removed duplicate /api/logs endpoint - using the one at line ~1173 instead
 
 
 @app.get('/api/runs')
@@ -817,6 +794,43 @@ def momentum_scanner_job():
                     category='MOMENTUM',
                     message=f"Signal: {s.symbol} +{s.price_change_pct:.2f}% (AI: {s.ai_confidence:.0%})"
                 ))
+                
+                # Auto-execute trade if enabled
+                if config.get('auto_execute', False):
+                    try:
+                        from .trading_service import TradingService
+                        trading_service = TradingService(binance)
+                        
+                        # Buy with configured amount
+                        trade_amount = float(config.get('trade_amount_usdt', '50'))
+                        result = trading_service.buy_market(db, s.symbol, trade_amount)
+                        
+                        if result:
+                            # Create momentum trade record
+                            momentum_trade = MomentumTrade(
+                                signal_id=s.id,
+                                symbol=s.symbol,
+                                side='BUY',
+                                entry_price=result.price,
+                                quantity=result.quantity,
+                                stop_loss=result.price * (1 - float(config.get('stop_loss_pct', '5')) / 100),
+                                status='OPEN'
+                            )
+                            db.add(momentum_trade)
+                            
+                            # Update signal status
+                            s.status = 'EXECUTED'
+                            
+                            print(f"[Momentum] ✅ AUTO-BOUGHT {s.symbol}: ${trade_amount} @ ${result.price:.4f}")
+                            db.add(BotLog(
+                                level='INFO',
+                                category='MOMENTUM',
+                                message=f"Auto-bought {s.symbol}: ${trade_amount} @ ${result.price:.4f}"
+                            ))
+                        else:
+                            print(f"[Momentum] ❌ Failed to auto-buy {s.symbol}")
+                    except Exception as e:
+                        print(f"[Momentum] Error auto-buying {s.symbol}: {e}")
         
         # Check active signals and expire dead ones
         from .models import MomentumSignal

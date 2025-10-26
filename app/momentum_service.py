@@ -24,18 +24,45 @@ class MomentumTradingService:
     
     def __init__(self, binance_client: BinanceClient):
         self.binance = binance_client
-        self.config = {
-            'min_price_change_pct': float(os.getenv('MOMENTUM_MIN_PRICE_CHANGE', '20')),  # 20%
-            'min_volume_24h': float(os.getenv('MOMENTUM_MIN_VOLUME', '1000000')),  # $1M
-            'volume_spike_ratio': float(os.getenv('MOMENTUM_VOLUME_SPIKE', '2.0')),  # 2x avg
-            'ai_confidence_threshold': float(os.getenv('MOMENTUM_AI_THRESHOLD', '0.8')),
-            'max_position_pct': float(os.getenv('MOMENTUM_MAX_POSITION', '10')),  # 10% of portfolio
-            'stop_loss_pct': float(os.getenv('MOMENTUM_STOP_LOSS', '5')),  # 5%
-            'intervals': os.getenv('MOMENTUM_INTERVALS', '15m,1h').split(','),
-            'check_frequency': int(os.getenv('MOMENTUM_CHECK_FREQ', '60')),  # seconds
-        }
+        
+        # Choose between BEST (max profit) or MORE_TRADES (higher frequency)
+        profile = os.getenv('MOMENTUM_PROFILE', 'BEST')  # BEST or MORE_TRADES
+        
+        if profile == 'BEST':
+            # 🏆 BEST CONFIG: +105% profit, 1.4 trades/week
+            self.config = {
+                'min_price_1h': 1.5,           # 1.5% hourly price surge
+                'min_volume_ratio': 1.5,       # 1.5x average volume
+                'breakout_threshold': 93,      # Within 7% of 24h high
+                'min_momentum_score': 60,      # Minimum total score
+                'stop_loss_pct': 5,            # 5% stop loss
+                'take_profit_pct': 8,          # 8% take profit
+                'trailing_stop_pct': 2.5,      # Trail 2.5% from peak
+                'max_position_usdt': float(os.getenv('MOMENTUM_TRADE_AMOUNT', '50')),
+                'intervals': ['1h'],
+                'auto_execute': True,  # ALWAYS AUTO-EXECUTE
+            }
+        else:
+            # 🔥 MORE TRADES CONFIG: +54% profit, 1.6 trades/week (RECOMMENDED)
+            self.config = {
+                'min_price_1h': 1.2,           # 1.2% hourly price surge (lower = more signals)
+                'min_volume_ratio': 1.3,       # 1.3x average volume
+                'breakout_threshold': 90,      # Within 10% of 24h high
+                'min_momentum_score': 50,      # Lower threshold = more trades
+                'stop_loss_pct': 5,            # 5% stop loss
+                'take_profit_pct': 8,          # 8% take profit
+                'trailing_stop_pct': 2.5,      # Trail 2.5% from peak
+                'max_position_usdt': float(os.getenv('MOMENTUM_TRADE_AMOUNT', '50')),
+                'intervals': ['1h'],
+                'auto_execute': True,  # ALWAYS AUTO-EXECUTE
+            }
+        
         self.ai_model = MomentumAIModel()
         self.active = False
+        
+        print(f"[Momentum] Loaded profile: {profile}")
+        print(f"[Momentum] Entry: {self.config['min_price_1h']}% price | {self.config['min_volume_ratio']}x vol | Score: {self.config['min_momentum_score']}")
+        print(f"[Momentum] Exit: -{self.config['stop_loss_pct']}% stop | +{self.config['take_profit_pct']}% TP | {self.config['trailing_stop_pct']}% trail")
     
     def get_market_overview(self, db: Session) -> Dict:
         """Get current momentum trading overview"""
@@ -111,7 +138,10 @@ class MomentumTradingService:
             tickers = self.binance.get_24h_tickers()
             
             print(f"\n[Momentum] Starting scan of {len(tickers)} pairs...")
-            print(f"[Momentum] Config: min_price={self.config['min_price_change_pct']}%, min_vol=${self.config['min_volume_24h']:,.0f}")
+            print(f"[Momentum] Config: min_price_1h={self.config['min_price_1h']}%, min_vol_ratio={self.config['min_volume_ratio']}x, min_score={self.config['min_momentum_score']}")
+            
+            # Minimum volume filter (always need at least $500k)
+            min_volume_24h = float(os.getenv('MOMENTUM_MIN_VOLUME', '500000'))
             
             for ticker in tickers:
                 symbol = ticker['symbol']
@@ -122,15 +152,15 @@ class MomentumTradingService:
                 
                 debug_info['checked'] += 1
                 
-                # Filter: Minimum volume
+                # Filter: Minimum 24h volume
                 volume_24h = float(ticker.get('quoteVolume', 0))
-                if volume_24h < self.config['min_volume_24h']:
+                if volume_24h < min_volume_24h:
                     debug_info['volume_filtered'] += 1
                     continue
                 
-                # Check price change
-                price_change = float(ticker.get('priceChangePercent', 0))
-                if price_change < self.config['min_price_change_pct']:
+                # Filter: Must be positive 24h change
+                price_change_24h = float(ticker.get('priceChangePercent', 0))
+                if price_change_24h < 0:
                     debug_info['price_filtered'] += 1
                     continue
                 
@@ -192,19 +222,25 @@ class MomentumTradingService:
         return signals
     
     def _analyze_symbol(self, db: Session, symbol: str, interval: str, ticker: Dict, return_reason=False):
-        """Analyze a symbol for momentum signal"""
+        """
+        Analyze a symbol for momentum signal using OPTIMIZED BACKTEST logic
+        
+        Scoring system (need >= min_momentum_score to trigger):
+        - Price surge 1h (0-40 points)
+        - Volume spike (0-30 points)
+        - Breakout position (0-30 points)
+        """
         try:
-            # Get recent candles (raw format: [timestamp, open, high, low, close, volume, ...])
-            raw_candles = self.binance.get_klines(symbol, interval, limit=50)
-            if not raw_candles or len(raw_candles) < 20:
-                print(f"[Momentum]   ❌ {symbol}: Not enough data")
+            # Get recent 24h of 1h candles
+            raw_candles = self.binance.get_klines(symbol, '1h', limit=25)
+            if not raw_candles or len(raw_candles) < 25:
                 return (None, "Not enough candle data") if return_reason else None
             
-            # Format candles into dict format
+            # Format candles
             candles = []
             for candle in raw_candles:
                 candles.append({
-                    'time': candle[0],
+                    'timestamp': candle[0],
                     'open': float(candle[1]),
                     'high': float(candle[2]),
                     'low': float(candle[3]),
@@ -212,96 +248,84 @@ class MomentumTradingService:
                     'volume': float(candle[5])
                 })
             
+            # Get current data
             latest = candles[-1]
             current_price = latest['close']
-            
-            # Calculate price change
-            price_change_pct = float(ticker.get('priceChangePercent', 0))
-            
-            # Filter: Minimum price change
-            if price_change_pct < self.config['min_price_change_pct']:
-                return (None, f"Price change {price_change_pct:.2f}% below threshold") if return_reason else None
-            
-            # Calculate technical indicators
-            technical = self._calculate_technicals(candles)
-            
-            # Get order book for liquidity check
-            order_book = self.binance.get_order_book(symbol, limit=20)
-            spread_pct = self._calculate_spread(order_book)
-            
-            # Filter: High spread (low liquidity)
-            if spread_pct > 1.0:  # > 1% spread
-                print(f"[Momentum]   ❌ {symbol}: Spread too high ({spread_pct:.2f}%)")
-                return (None, f"Spread too high ({spread_pct:.2f}%)") if return_reason else None
-            
-            # Calculate volume ratio (current vs average)
-            avg_volume = sum(c['volume'] for c in candles[:-1]) / (len(candles) - 1)
             current_volume = latest['volume']
+            
+            # 1. Calculate 1h price change
+            price_1h_ago = candles[-2]['close'] if len(candles) > 1 else current_price
+            price_change_1h = ((current_price - price_1h_ago) / price_1h_ago) * 100
+            
+            # 2. Calculate volume ratio
+            avg_volume = np.mean([c['volume'] for c in candles[:-1]])
             volume_ratio = current_volume / avg_volume if avg_volume > 0 else 0
             
-            # Filter: Volume spike required
-            if volume_ratio < self.config['volume_spike_ratio']:
-                print(f"[Momentum]   ❌ {symbol}: Volume not spiking ({volume_ratio:.2f}x, need {self.config['volume_spike_ratio']}x)")
-                return (None, f"Volume not spiking ({volume_ratio:.2f}x, need {self.config['volume_spike_ratio']}x)") if return_reason else None
+            # 3. Calculate breakout position (% of 24h high)
+            high_24h = max(c['high'] for c in candles)
+            breakout_score = (current_price / high_24h) * 100
             
-            print(f"[Momentum]   🎯 {symbol}: Passed filters! Vol spike {volume_ratio:.2f}x - Asking AI...")
+            # 4. Calculate momentum score
+            momentum_score = 0
+            reasons = []
             
-            # Prepare features for AI model
-            features = {
-                'price_change_pct': price_change_pct,
-                'volume_ratio': volume_ratio,
-                'rsi': technical['rsi'],
-                'macd': technical['macd'],
-                'macd_signal': technical['macd_signal'],
-                'ema_20': technical['ema_20'],
-                'ema_50': technical['ema_50'],
-                'current_price': current_price,
-                'spread_pct': spread_pct,
-            }
+            # Price momentum (0-40 points)
+            if price_change_1h >= self.config['min_price_1h']:
+                momentum_score += min(price_change_1h * 2, 40)
+                reasons.append(f"1h: +{price_change_1h:.1f}%")
             
-            # Get AI prediction
-            ai_result = self.ai_model.predict(features, candles)
+            # Volume surge (0-30 points)
+            if volume_ratio >= self.config['min_volume_ratio']:
+                momentum_score += min((volume_ratio - 1) * 15, 30)
+                reasons.append(f"Vol: {volume_ratio:.1f}x")
             
-            print(f"[Momentum]   🤖 {symbol}: AI confidence = {ai_result['confidence']:.0%} (need {self.config['ai_confidence_threshold']:.0%})")
-            ai_confidence = ai_result['confidence']
-            predicted_exit = ai_result['predicted_exit']
+            # Breakout (0-30 points)
+            if breakout_score >= self.config['breakout_threshold']:
+                momentum_score += 30
+                reasons.append(f"Breakout: {breakout_score:.0f}%")
             
-            # Filter: AI confidence threshold
-            if ai_confidence < self.config['ai_confidence_threshold']:
-                return (None, f"AI confidence {ai_confidence:.0%} below threshold {self.config['ai_confidence_threshold']:.0%}") if return_reason else None
+            # Check if momentum is strong enough
+            if momentum_score < self.config['min_momentum_score']:
+                reason = f"Score {momentum_score:.0f} < {self.config['min_momentum_score']} ({', '.join(reasons) if reasons else 'No momentum'})"
+                return (None, reason) if return_reason else None
+            
+            print(f"[Momentum]   ✅ {symbol}: Score {momentum_score:.0f}/100 | {' | '.join(reasons)}")
             
             # Create signal
             signal = MomentumSignal(
                 symbol=symbol,
-                interval=interval,
-                price_change_pct=price_change_pct,
+                interval='1h',
+                price_change_pct=price_change_1h,
                 volume_24h=float(ticker.get('quoteVolume', 0)),
                 volume_ratio=volume_ratio,
-                ai_confidence=ai_confidence,
-                predicted_exit=predicted_exit,
-                technical_score=technical['score'],
+                ai_confidence=momentum_score / 100,  # Store as 0-1 for compatibility
+                predicted_exit=None,
+                technical_score=int(momentum_score),
                 status='ACTIVE',
                 triggered_at=datetime.utcnow(),
-                expires_at=datetime.utcnow() + timedelta(hours=1),
+                expires_at=datetime.utcnow() + timedelta(hours=4),  # Expires in 4h
                 meta={
-                    'rsi': technical['rsi'],
-                    'macd': technical['macd'],
-                    'ema_20': technical['ema_20'],
-                    'ema_50': technical['ema_50'],
-                    'spread_pct': spread_pct,
+                    'momentum_score': momentum_score,
+                    'price_change_1h': price_change_1h,
+                    'volume_ratio': volume_ratio,
+                    'breakout_score': breakout_score,
                     'current_price': current_price,
+                    'high_24h': high_24h,
+                    'reasons': reasons
                 }
             )
             
             db.add(signal)
             db.commit()
             
-            print(f"✅ Signal detected: {symbol} @ {interval} | Change: {price_change_pct:.2f}% | AI: {ai_confidence:.2f}")
+            print(f"[Momentum] ✅ SIGNAL: {symbol} | Score: {momentum_score:.0f}/100 | {' | '.join(reasons)}")
             
             return (signal, None) if return_reason else signal
             
         except Exception as e:
-            print(f"Error analyzing {symbol}: {e}")
+            print(f"[Momentum] Error analyzing {symbol}: {e}")
+            import traceback
+            traceback.print_exc()
             return (None, f"Error: {str(e)}") if return_reason else None
     
     def _calculate_technicals(self, candles: List[Dict]) -> Dict:

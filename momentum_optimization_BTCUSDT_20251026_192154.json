@@ -1,0 +1,218 @@
+{
+  "symbol": "BTCUSDT",
+  "tested_at": "2025-10-26T19:21:54.289141",
+  "days": 365,
+  "total_configs": 16640,
+  "profitable_configs": 7930,
+  "best_config": {
+    "config": {
+      "min_price_1h": 1.5,
+      "min_volume_ratio": 1.5,
+      "breakout_threshold": 93,
+      "min_momentum_score": 60,
+      "stop_loss_pct": 5,
+      "take_profit_pct": 8,
+      "trailing_stop_pct": 2.5
+    },
+    "pnl": 1055.908021926818,
+    "return_pct": 105.59080219268179,
+    "trades": 75,
+    "win_rate": 69.33333333333334,
+    "avg_win": 4.139207671982429,
+    "avg_loss": -5.500573977273524,
+    "profit_factor": 1.6053732397802127,
+    "swings_found": 75
+  },
+  "top_10": [
+    {
+      "config": {
+        "min_price_1h": 1.5,
+        "min_volume_ratio": 1.5,
+        "breakout_threshold": 93,
+        "min_momentum_score": 60,
+        "stop_loss_pct": 5,
+        "take_profit_pct": 8,
+        "trailing_stop_pct": 2.5
+      },
+      "pnl": 1055.908021926818,
+      "return_pct": 105.59080219268179,
+      "trades": 75,
+      "win_rate": 69.33333333333334,
+      "avg_win": 4.139207671982429,
+      "avg_loss": -5.500573977273524,
+      "profit_factor": 1.6053732397802127,
+      "swings_found": 75
+    },
+    {
+      "config": {
+        "min_price_1h": 1.5,
+        "min_volume_ratio": 2.0,
+        "breakout_threshold": 93,
+        "min_momentum_score": 60,
+        "stop_loss_pct": 5,
+        "take_profit_pct": 8,
+        "trailing_stop_pct": 2.5
+      },
+      "pnl": 1055.908021926818,
+      "return_pct": 105.59080219268179,
+      "trades": 75,
+      "win_rate": 69.33333333333334,
+      "avg_win": 4.139207671982429,
+      "avg_loss": -5.500573977273524,
+      "profit_factor": 1.6053732397802127,
+      "swings_found": 75
+    },
+    {
+      "config": {
+        "min_price_1h": 1.5,
+        "min_volume_ratio": 2.5,
+        "breakout_threshold": 93,
+        "min_momentum_score": 60,
+        "stop_loss_pct": 5,
+        "take_profit_pct": 8,
+        "trailing_stop_pct": 2.5
+      },
+      "pnl": 1055.908021926818,
+      "return_pct": 105.59080219268179,
+      "trades": 75,
+      "win_rate": 69.33333333333334,
+      "avg_win": 4.139207671982429,
+      "avg_loss": -5.500573977273524,
+      "profit_factor": 1.6053732397802127,
+      "swings_found": 75
+    },
+    {
+      "config": {
+        "min_price_1h": 1.5,
+        "min_volume_ratio": 1.5,
+        "breakout_threshold": 93,
+        "min_momentum_score": 60,
+        "stop_loss_pct": 5,
+        "take_profit_pct": 10,
+        "trailing_stop_pct": 2.5
+      },
+      "pnl": 962.504377768043,
+      "return_pct": 96.2504377768043,
+      "trades": 74,
+      "win_rate": 70.27027027027027,
+      "avg_win": 3.9216347602263157,
+      "avg_loss": -5.480429089612809,
+      "profit_factor": 1.5902420320101285,
+      "swings_found": 74
+    },
+    {
+      "config": {
+        "min_price_1h": 1.5,
+        "min_volume_ratio": 2.0,
+        "breakout_threshold": 93,
+        "min_momentum_score": 60,
+        "stop_loss_pct": 5,
+        "take_profit_pct": 10,
+        "trailing_stop_pct": 2.5
+      },
+      "pnl": 962.504377768043,
+      "return_pct": 96.2504377768043,
+      "trades": 74,
+      "win_rate": 70.27027027027027,
+      "avg_win": 3.9216347602263157,
+      "avg_loss": -5.480429089612809,
+      "profit_factor": 1.5902420320101285,
+      "swings_found": 74
+    },
+    {
+      "config": {
+        "min_price_1h": 1.5,
+        "min_volume_ratio": 2.5,
+        "breakout_threshold": 93,
+        "min_momentum_score": 60,
+        "stop_loss_pct": 5,
+        "take_profit_pct": 10,
+        "trailing_stop_pct": 2.5
+      },
+      "pnl": 962.504377768043,
+      "return_pct": 96.2504377768043,
+      "trades": 74,
+      "win_rate": 70.27027027027027,
+      "avg_win": 3.9216347602263157,
+      "avg_loss": -5.480429089612809,
+      "profit_factor": 1.5902420320101285,
+      "swings_found": 74
+    },
+    {
+      "config": {
+        "min_price_1h": 1.5,
+        "min_volume_ratio": 1.5,
+        "breakout_threshold": 93,
+        "min_momentum_score": 60,
+        "stop_loss_pct": 5,
+        "take_profit_pct": 12,
+        "trailing_stop_pct": 2.5
+      },
+      "pnl": 922.5985592791778,
+      "return_pct": 92.25985592791778,
+      "trades": 70,
+      "win_rate": 68.57142857142857,
+      "avg_win": 4.2171199271875865,
+      "avg_loss": -5.4958608278773475,
+      "profit_factor": 1.5675691495046922,
+      "swings_found": 70
+    },
+    {
+      "config": {
+        "min_price_1h": 1.5,
+        "min_volume_ratio": 2.0,
+        "breakout_threshold": 93,
+        "min_momentum_score": 60,
+        "stop_loss_pct": 5,
+        "take_profit_pct": 12,
+        "trailing_stop_pct": 2.5
+      },
+      "pnl": 922.5985592791778,
+      "return_pct": 92.25985592791778,
+      "trades": 70,
+      "win_rate": 68.57142857142857,
+      "avg_win": 4.2171199271875865,
+      "avg_loss": -5.4958608278773475,
+      "profit_factor": 1.5675691495046922,
+      "swings_found": 70
+    },
+    {
+      "config": {
+        "min_price_1h": 1.5,
+        "min_volume_ratio": 2.5,
+        "breakout_threshold": 93,
+        "min_momentum_score": 60,
+        "stop_loss_pct": 5,
+        "take_profit_pct": 12,
+        "trailing_stop_pct": 2.5
+      },
+      "pnl": 922.5985592791778,
+      "return_pct": 92.25985592791778,
+      "trades": 70,
+      "win_rate": 68.57142857142857,
+      "avg_win": 4.2171199271875865,
+      "avg_loss": -5.4958608278773475,
+      "profit_factor": 1.5675691495046922,
+      "swings_found": 70
+    },
+    {
+      "config": {
+        "min_price_1h": 2.0,
+        "min_volume_ratio": 1.5,
+        "breakout_threshold": 93,
+        "min_momentum_score": 60,
+        "stop_loss_pct": 5,
+        "take_profit_pct": 8,
+        "trailing_stop_pct": 2.5
+      },
+      "pnl": 907.4755938619992,
+      "return_pct": 90.74755938619991,
+      "trades": 74,
+      "win_rate": 68.91891891891892,
+      "avg_win": 4.067787898730589,
+      "avg_loss": -5.500573977273522,
+      "profit_factor": 1.5435815077449622,
+      "swings_found": 74
+    }
+  ]
+}
