@@ -262,13 +262,24 @@ def api_insights(db: Session = Depends(get_db)):
     # Debug: Check recent news count
     total_news = db.query(func.count(NewsArticle.id)).scalar() or 0
     
+    # Get unique tickers from recent news (last 24 hours)
+    import datetime
+    now = datetime.datetime.utcnow()
+    since = now - datetime.timedelta(hours=24)
+    recent_news = db.query(NewsArticle).filter(NewsArticle.created_at >= since).all()
+    
+    unique_tickers = set()
+    for article in recent_news:
+        if article.tickers:
+            tickers = [t.strip().upper() for t in article.tickers.split(',') if t.strip()]
+            unique_tickers.update(tickers)
+    
+    analyzed_coins = len(unique_tickers)
+    
     # top symbols by signals
     sym_counts = db.query(Signal.symbol, func.count(Signal.id)).group_by(Signal.symbol).order_by(func.count(Signal.id).desc()).limit(5).all()
     top_symbols = [[s, c] for s, c in sym_counts]
     # hourly signals for last 24h
-    import datetime
-    now = datetime.datetime.utcnow()
-    since = now - datetime.timedelta(hours=24)
     recent = db.query(Signal).filter(Signal.created_at >= since).all()
     by_hour = {}
     for s in recent:
@@ -288,7 +299,8 @@ def api_insights(db: Session = Depends(get_db)):
         'debug': {
             'has_openai_key': has_openai_key,
             'total_news_articles': total_news,
-            'watchlist': os.getenv('WATCHLIST', 'BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT')
+            'coins_analyzed': analyzed_coins,
+            'mode': 'All coins from news (last 24h)'
         }
     }
 
@@ -612,8 +624,33 @@ def scheduled_job():
             run.skipped = stats.get('skipped', 0)
             run.total = stats.get('total', 0)
         
-        # Decide on watchlist (new coins to potentially buy)
-        symbols = [s.strip().upper() for s in os.getenv('WATCHLIST', 'BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT').split(',')]
+        # Decide on ALL coins mentioned in recent news (not just watchlist)
+        # Get all unique tickers from recent news (last 24 hours)
+        from datetime import timedelta
+        recent_cutoff = datetime.utcnow() - timedelta(hours=24)
+        recent_news = db.query(NewsArticle).filter(
+            NewsArticle.created_at >= recent_cutoff
+        ).all()
+        
+        # Extract all unique tickers
+        all_tickers = set()
+        for article in recent_news:
+            if article.tickers:
+                tickers = [t.strip().upper() for t in article.tickers.split(',') if t.strip()]
+                for ticker in tickers:
+                    # Add both the base ticker and USDT pair
+                    all_tickers.add(ticker)
+                    if not ticker.endswith('USDT'):
+                        all_tickers.add(f"{ticker}USDT")
+        
+        # Convert to list and sort
+        symbols = sorted(list(all_tickers))
+        
+        # If no tickers found in news, fall back to watchlist
+        if not symbols:
+            symbols = [s.strip().upper() for s in os.getenv('WATCHLIST', 'BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT').split(',')]
+        
+        print(f"[AI] Analyzing {len(symbols)} coins from recent news: {', '.join(symbols[:10])}{'...' if len(symbols) > 10 else ''}")
         signals = ai_decider.decide(db, symbols)
         
         # Log AI decisions

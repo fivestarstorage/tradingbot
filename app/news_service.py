@@ -2,11 +2,14 @@ import os
 import re
 import json
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from bs4 import BeautifulSoup
 from openai import OpenAI
 from .models import NewsArticle
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+import time
 
 CRYPTO_NEWS_URL = os.getenv(
     'CRYPTONEWS_URL',
@@ -329,6 +332,237 @@ def scrape_cointelegraph_rss():
         return []
 
 
+def parse_relative_timestamp(relative_time: str):
+    """
+    Converts relative timestamps like "38m", "6h", "2d" to absolute datetime.
+    Returns datetime object (UTC naive for consistent storage).
+    """
+    try:
+        # Remove whitespace
+        relative_time = relative_time.strip().lower()
+        
+        # Extract number and unit
+        match = re.match(r'(\d+)([smhd])', relative_time)
+        if not match:
+            # Fallback to current time if we can't parse
+            return datetime.utcnow()
+        
+        value = int(match.group(1))
+        unit = match.group(2)
+        
+        now = datetime.utcnow()
+        
+        if unit == 's':  # seconds
+            return now - timedelta(seconds=value)
+        elif unit == 'm':  # minutes
+            return now - timedelta(minutes=value)
+        elif unit == 'h':  # hours
+            return now - timedelta(hours=value)
+        elif unit == 'd':  # days
+            return now - timedelta(days=value)
+        else:
+            return now
+    except Exception:
+        return datetime.utcnow()
+
+
+def scrape_binance_square():
+    """
+    Scrapes latest posts from Binance Square using Selenium.
+    Returns a list of article dictionaries with sentiment and tickers analyzed by AI.
+    """
+    try:
+        print("[Binance Square] Starting scrape...")
+        
+        # Setup Chrome options for headless mode
+        chrome_options = Options()
+        chrome_options.add_argument('--headless')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_argument('--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36')
+        
+        driver = webdriver.Chrome(options=chrome_options)
+        driver.set_page_load_timeout(30)
+        
+        # Navigate to Binance Square
+        url = "https://www.binance.com/en/square"
+        driver.get(url)
+        
+        # Wait for content to load
+        time.sleep(5)
+        
+        # Scroll to load more posts
+        for i in range(2):
+            driver.execute_script("window.scrollBy(0, 1000);")
+            time.sleep(1)
+        
+        # Parse HTML
+        html = driver.page_source
+        soup = BeautifulSoup(html, 'lxml')
+        driver.quit()
+        
+        # Find all feed cards
+        feed_cards = soup.select('div.feed-card')
+        print(f"[Binance Square] Found {len(feed_cards)} posts")
+        
+        articles = []
+        
+        # Get OpenAI client for sentiment analysis
+        openai_key = os.getenv('OPENAI_API_KEY')
+        client = OpenAI(api_key=openai_key) if openai_key else None
+        
+        for idx, card in enumerate(feed_cards[:15], 1):  # Limit to 15 posts
+            try:
+                # Extract content
+                content_elem = card.select_one('[class*="content"]') or card.select_one('p')
+                if content_elem:
+                    full_text = content_elem.get_text().strip()
+                else:
+                    # Fallback: get all text
+                    all_text = card.get_text().strip()
+                    lines = [line.strip() for line in all_text.split('\n') if line.strip()]
+                    if len(lines) < 2:
+                        continue
+                    full_text = ' '.join(lines[1:])  # Skip first line (usually author)
+                
+                if len(full_text) < 20:
+                    continue
+                
+                # Create title (first 100 chars)
+                title = full_text[:100] + ('...' if len(full_text) > 100 else '')
+                
+                # Extract URL - look for post ID in various places
+                article_url = None
+                
+                # Try to find post ID from data attributes or links
+                post_elem = card.find_parent('[data-bn-type]') or card
+                
+                # Look for links with /square/post/ pattern
+                post_links = card.select('a[href*="/square/post/"]')
+                if post_links:
+                    href = post_links[0].get('href')
+                    article_url = f"https://www.binance.com{href}" if href.startswith('/') else href
+                
+                # Fallback: try to extract post ID from any data attribute
+                if not article_url:
+                    for elem in card.find_all(attrs={'data-id': True}):
+                        post_id = elem.get('data-id')
+                        if post_id:
+                            article_url = f"https://www.binance.com/en/square/post/{post_id}"
+                            break
+                
+                # Last fallback: use profile link but mark as fallback
+                if not article_url:
+                    link_elem = card.select_one('a[href*="/square/"]')
+                    if link_elem and link_elem.get('href'):
+                        href = link_elem.get('href')
+                        # Try to extract post ID from the page's other elements
+                        article_url = f"{url}#post-{idx}"  # Fallback URL
+                
+                # Extract timestamp
+                time_elem = card.select_one('[class*="time"]') or card.select_one('time')
+                if time_elem:
+                    relative_time = time_elem.get_text().strip()
+                    published_date = parse_relative_timestamp(relative_time)
+                else:
+                    published_date = datetime.utcnow()
+                
+                # Use OpenAI to analyze sentiment and extract tickers
+                sentiment = 'Neutral'
+                tickers = []
+                
+                if client:
+                    try:
+                        # Extract tickers using regex first (faster)
+                        ticker_pattern = r'\$([A-Z]{2,10})(?:\s|$|[.,!?])'
+                        matches = re.findall(ticker_pattern, full_text)
+                        tickers = list(set(matches))
+                        
+                        # Use OpenAI for sentiment
+                        response = client.chat.completions.create(
+                            model='gpt-4o-mini',
+                            messages=[
+                                {
+                                    'role': 'system',
+                                    'content': 'You are a crypto news sentiment analyzer. Analyze the sentiment of the given text and return ONLY one word: Positive, Negative, or Neutral. Always respond with valid JSON.'
+                                },
+                                {
+                                    'role': 'user',
+                                    'content': f"Analyze the sentiment:\n\n{full_text[:500]}"
+                                }
+                            ],
+                            temperature=0.3,
+                            max_tokens=50
+                        )
+                        sentiment_text = response.choices[0].message.content.strip()
+                        if sentiment_text in ['Positive', 'Negative', 'Neutral']:
+                            sentiment = sentiment_text
+                        
+                        # If no tickers found via regex, try AI extraction
+                        if not tickers:
+                            ticker_response = client.chat.completions.create(
+                                model='gpt-4o-mini',
+                                messages=[
+                                    {
+                                        'role': 'system',
+                                        'content': 'Extract cryptocurrency tickers mentioned in the text. Return a JSON array of ticker symbols (without $ prefix). If none found, return []. Always respond with valid JSON.'
+                                    },
+                                    {
+                                        'role': 'user',
+                                        'content': f"Extract tickers from:\n\n{full_text[:500]}"
+                                    }
+                                ],
+                                temperature=0.3,
+                                max_tokens=100
+                            )
+                            ticker_text = ticker_response.choices[0].message.content.strip()
+                            try:
+                                tickers = json.loads(ticker_text)
+                                if not isinstance(tickers, list):
+                                    tickers = []
+                            except:
+                                tickers = []
+                    except Exception as e:
+                        print(f"  ⚠️  AI analysis failed for post {idx}: {e}")
+                        sentiment = 'Neutral'
+                
+                article_data = {
+                    'news_url': article_url,
+                    'title': title,
+                    'text': full_text[:500],
+                    'image_url': None,  # Binance Square doesn't easily expose images
+                    'source_name': 'Binance Square',
+                    'date': published_date,
+                    'type': 'Post',
+                    'sentiment': sentiment,
+                    'tickers': tickers
+                }
+                
+                articles.append(article_data)
+                print(f"  {idx}. {title[:60]} | Sentiment: {sentiment} | Tickers: {', '.join(tickers) or 'None'}")
+                
+            except Exception as e:
+                print(f"  ✗ Error processing post {idx}: {e}")
+                continue
+        
+        # Sort by date (newest first)
+        articles.sort(key=lambda x: x['date'], reverse=True)
+        
+        print(f"[Binance Square] ✓ Scraped {len(articles)} posts (sorted newest to oldest)")
+        return articles
+        
+    except Exception as e:
+        print(f"[Binance Square] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            driver.quit()
+        except:
+            pass
+        return []
+
+
 def fetch_and_store_news(db: Session, api_key: str):
     items = []
     
@@ -354,6 +588,10 @@ def fetch_and_store_news(db: Session, api_key: str):
     # Also fetch from CoinTelegraph RSS
     cointelegraph_items = scrape_cointelegraph_rss()
     items.extend(cointelegraph_items)
+    
+    # Also fetch from Binance Square
+    binance_square_items = scrape_binance_square()
+    items.extend(binance_square_items)
     
     inserted = 0
     skipped = 0

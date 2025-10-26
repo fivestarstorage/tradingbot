@@ -8,7 +8,10 @@ from .models import NewsArticle, Signal
 SYSTEM_PROMPT = (
     "You are a crypto trading assistant. Given a batch of recent news items, "
     "decide one action per target symbol: BUY, SELL or HOLD. Be conservative unless "
-    "multiple articles support the same direction. Include confidence 0-100 and a brief reasoning."
+    "multiple articles support the same direction. Include confidence 0-100 and a brief reasoning. "
+    "\n\nIMPORTANT: Also provide broader market context. If news mentions a specific sector (e.g., mining, DeFi, gaming), "
+    "also recommend related coins in that sector even if they weren't directly mentioned in the news. "
+    "Look for themes and patterns across articles to identify emerging trends."
 )
 
 
@@ -45,9 +48,14 @@ class AIDecider:
                 user_msg = {
                     'role': 'user',
                     'content': (
-                        "Symbols: " + ", ".join(symbols) + "\n" +
-                        "News JSON: " + str(items) + "\n" +
-                        "Return a JSON list with objects {symbol, action, confidence, reasoning, ref_url}."
+                        "Analyze the following news for ALL mentioned symbols: " + ", ".join(symbols) + "\n\n" +
+                        "News JSON: " + str(items) + "\n\n" +
+                        "Instructions:\n" +
+                        "1. For each symbol with direct news, provide: {symbol, action, confidence, reasoning, ref_url}\n" +
+                        "2. Identify themes/sectors mentioned (e.g., mining, DeFi, gaming, NFTs, Layer-2)\n" +
+                        "3. For important themes, recommend related coins even if not directly mentioned\n" +
+                        "4. Return a JSON list of ALL recommendations (both direct and related)\n" +
+                        "5. Be specific about WHY related coins are recommended (e.g., 'Mining sector bullish due to BTC news')"
                     )
                 }
 
