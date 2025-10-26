@@ -935,8 +935,14 @@ scheduler.start()
 @app.post('/api/runs/refresh')
 def api_runs_refresh():
     # Force a news fetch + decision run now
-    scheduled_job()
-    return {'ok': True}
+    try:
+        scheduled_job()
+        return {'ok': True, 'message': 'News fetch and AI analysis completed successfully'}
+    except Exception as e:
+        print(f"[Force Refresh] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'ok': False, 'error': str(e), 'traceback': traceback.format_exc()}
 
 
 # ==================== MOMENTUM TRADING ENDPOINTS ====================

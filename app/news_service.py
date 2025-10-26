@@ -115,11 +115,16 @@ def analyze_article_with_ai(title: str, content: str):
         
         client = OpenAI(api_key=api_key)
         
-        prompt = f"""Analyze this crypto news article and extract information in JSON format.
+        prompt = f"""Analyze this crypto news article with HEIGHTENED SENSITIVITY.
 
 Title: {title}
 
 Content: {content[:2000]}
+
+Be VERY OPINIONATED and SENSITIVE:
+- ANY positive language, growth, gains, adoption, bullish signs = "Positive"
+- ANY negative language, losses, concerns, warnings, bearish signs = "Negative"
+- ONLY use "Neutral" if completely factual with no direction
 
 Provide:
 1. sentiment: "Positive", "Negative", or "Neutral"
@@ -134,11 +139,11 @@ Respond with valid JSON in this format:
         response = client.chat.completions.create(
             model='gpt-4o-mini',
             messages=[
-                {"role": "system", "content": "You are a crypto news analyst. Always respond with valid JSON."},
+                {"role": "system", "content": "You are an AGGRESSIVE crypto sentiment analyzer. Be very opinionated and pick sides. AVOID Neutral unless truly ambiguous. Always respond with valid JSON."},
                 {"role": "user", "content": prompt}
             ],
             response_format={"type": "json_object"},
-            temperature=0.3
+            temperature=0.5  # Increased for more opinionated responses
         )
         
         result = json.loads(response.choices[0].message.content)
@@ -528,14 +533,14 @@ def scrape_binance_square():
                             messages=[
                                 {
                                     'role': 'system',
-                                    'content': 'You are a crypto analyst. Extract: 1) sentiment (Positive/Negative/Neutral) and 2) crypto tickers mentioned. Return JSON: {"sentiment": "...", "tickers": ["...", "..."]}. Always respond with valid JSON.'
+                                    'content': 'You are an AGGRESSIVE crypto sentiment analyzer. Be VERY SENSITIVE and opinionated. Even slight positive language = Positive. Even slight negative language = Negative. AVOID Neutral unless truly ambiguous. Extract: 1) sentiment (Positive/Negative/Neutral) and 2) crypto tickers. Return JSON: {"sentiment": "...", "tickers": ["...", "..."]}. Always respond with valid JSON.'
                                 },
                                 {
                                     'role': 'user',
-                                    'content': f"Analyze this crypto post:\n\n{full_text[:500]}"
+                                    'content': f"Analyze this crypto post with HEIGHTENED SENSITIVITY:\n\n{full_text[:500]}"
                                 }
                             ],
-                            temperature=0.3,
+                            temperature=0.5,  # Increased for more varied responses
                             max_tokens=150
                         )
                         result = response.choices[0].message.content.strip()
@@ -549,9 +554,9 @@ def scrape_binance_square():
                                         tickers.append(t)
                         except:
                             # Fallback: just extract sentiment
-                            if 'positive' in result.lower():
+                            if 'positive' in result.lower() or 'bullish' in result.lower() or 'up' in result.lower():
                                 sentiment = 'Positive'
-                            elif 'negative' in result.lower():
+                            elif 'negative' in result.lower() or 'bearish' in result.lower() or 'down' in result.lower():
                                 sentiment = 'Negative'
                     except Exception as e:
                         print(f"  ⚠️  AI analysis failed for post {idx}: {e}")
