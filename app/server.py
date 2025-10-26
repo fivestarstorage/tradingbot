@@ -174,6 +174,37 @@ def api_runs(limit: int = 20, db: Session = Depends(get_db)):
     ]
 
 
+@app.get('/api/runs/debug')
+def api_runs_debug(db: Session = Depends(get_db)):
+    """Debug endpoint to check database state"""
+    try:
+        # Count total runs
+        total_runs = db.query(func.count(SchedulerRun.id)).scalar() or 0
+        
+        # Get latest run
+        latest_run = db.query(SchedulerRun).order_by(SchedulerRun.started_at.desc()).first()
+        
+        # Get database path
+        db_path = str(db.bind.url) if hasattr(db, 'bind') else 'unknown'
+        
+        return {
+            'total_runs': total_runs,
+            'database_path': db_path,
+            'latest_run': {
+                'id': latest_run.id if latest_run else None,
+                'started_at': latest_run.started_at.isoformat() if latest_run and latest_run.started_at else None,
+                'total': latest_run.total if latest_run else None,
+                'signals': latest_run.signals if latest_run else None,
+            } if latest_run else None,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+    except Exception as e:
+        return {
+            'error': str(e),
+            'traceback': __import__('traceback').format_exc()
+        }
+
+
 @app.get('/api/sentiment')
 def api_sentiment(db: Session = Depends(get_db)):
     # Aggregate simple counts by sentiment and top tickers
@@ -613,21 +644,27 @@ def scheduled_job():
     from .portfolio_manager import PortfolioManager
     import openai
     
+    print("[ScheduledJob] Starting news fetch and analysis...")
     db = SessionLocal()
     try:
+        print("[ScheduledJob] Creating SchedulerRun object...")
         run = SchedulerRun()
         api_key = os.getenv('CRYPTONEWS_API_KEY', '')
         if api_key:
+            print("[ScheduledJob] Fetching news...")
             stats = fetch_and_store_news(db, api_key)
             run.inserted = stats.get('inserted', 0)
             run.notes = f"updated={stats.get('updated',0)}"
             run.skipped = stats.get('skipped', 0)
             run.total = stats.get('total', 0)
+            print(f"[ScheduledJob] News fetched: {run.total} total, {run.inserted} inserted")
+        else:
+            print("[ScheduledJob] No CRYPTONEWS_API_KEY, skipping API fetch")
         
         # Decide on ALL coins mentioned in recent news (not just watchlist)
         # Get all unique tickers from recent news (last 24 hours)
         from datetime import timedelta
-        recent_cutoff = datetime.utcnow() - timedelta(hours=24)
+        recent_cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
         recent_news = db.query(NewsArticle).filter(
             NewsArticle.created_at >= recent_cutoff
         ).all()
@@ -790,12 +827,25 @@ Format:
             sig_line = f"Signals: {run.signals}, Buys: {run.buys}, Sells: {run.sells}"
             upd = run.notes or ''
             run.notes = ' | '.join([x for x in [upd, top_line, sig_line] if x])
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[ScheduledJob] Error composing notes: {e}")
+        
+        print(f"[ScheduledJob] Saving run to database...")
+        print(f"[ScheduledJob] Run data: total={run.total}, inserted={run.inserted}, signals={run.signals}")
         db.add(run)
         db.commit()
+        print(f"[ScheduledJob] ✓ Run saved successfully with ID: {run.id}")
+    except Exception as e:
+        print(f"[ScheduledJob] ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        try:
+            db.rollback()
+        except:
+            pass
     finally:
         db.close()
+        print("[ScheduledJob] Completed")
 
 
 def momentum_scanner_job():
@@ -876,7 +926,7 @@ def momentum_scanner_job():
         active_signals = db.query(MomentumSignal).filter(MomentumSignal.status == 'ACTIVE').all()
         for signal in active_signals:
             # Check if expired by time
-            if signal.expires_at and signal.expires_at < datetime.utcnow():
+            if signal.expires_at and signal.expires_at < datetime.now(timezone.utc):
                 signal.status = 'EXPIRED'
                 print(f"[Momentum] Signal expired: {signal.symbol}")
                 continue

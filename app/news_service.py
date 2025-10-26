@@ -316,7 +316,7 @@ def scrape_cointelegraph_rss():
                     'text': full_content[:500],  # First 500 chars of full content
                     'image_url': image_url,  # Image from article
                     'source_name': 'CoinTelegraph',
-                    'date': published_date or datetime.utcnow(),
+                    'date': published_date or datetime.now(timezone.utc),
                     'type': 'Article',
                     'sentiment': sentiment,
                     'tickers': tickers
@@ -350,12 +350,12 @@ def parse_relative_timestamp(relative_time: str):
         match = re.match(r'(\d+)([smhd])', relative_time)
         if not match:
             # Fallback to current time if we can't parse
-            return datetime.utcnow()
+            return datetime.now(timezone.utc)
         
         value = int(match.group(1))
         unit = match.group(2)
         
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         
         if unit == 's':  # seconds
             return now - timedelta(seconds=value)
@@ -368,7 +368,7 @@ def parse_relative_timestamp(relative_time: str):
         else:
             return now
     except Exception:
-        return datetime.utcnow()
+        return datetime.now(timezone.utc)
 
 
 def scrape_binance_square():
@@ -494,7 +494,7 @@ def scrape_binance_square():
                     relative_time = time_elem.get_text().strip()
                     published_date = parse_relative_timestamp(relative_time)
                 else:
-                    published_date = datetime.utcnow()
+                    published_date = datetime.now(timezone.utc)
                 
                 # Use OpenAI to analyze sentiment and extract tickers
                 sentiment = 'Neutral'

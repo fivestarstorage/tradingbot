@@ -77,7 +77,7 @@ class MomentumTradingService:
         ).all()
         
         # Recent closed trades (last 24h)
-        since = datetime.utcnow() - timedelta(hours=24)
+        since = datetime.now(timezone.utc) - timedelta(hours=24)
         recent_trades = db.query(MomentumTrade).filter(
             MomentumTrade.closed_at >= since,
             MomentumTrade.status == 'CLOSED'
@@ -302,8 +302,8 @@ class MomentumTradingService:
                 predicted_exit=None,
                 technical_score=int(momentum_score),
                 status='ACTIVE',
-                triggered_at=datetime.utcnow(),
-                expires_at=datetime.utcnow() + timedelta(hours=4),  # Expires in 4h
+                triggered_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=4),  # Expires in 4h
                 meta={
                     'momentum_score': momentum_score,
                     'price_change_1h': price_change_1h,
@@ -446,7 +446,7 @@ class MomentumTradingService:
                 take_profit=take_profit,
                 status='OPEN',
                 binance_order_id_entry=str(order.get('orderId', '')),
-                opened_at=datetime.utcnow(),
+                opened_at=datetime.now(timezone.utc),
                 meta={
                     'signal_data': signal.meta,
                     'order_data': order
@@ -544,7 +544,7 @@ class MomentumTradingService:
             trade.profit_loss = profit_loss
             trade.profit_loss_pct = profit_loss_pct
             trade.status = 'CLOSED'
-            trade.closed_at = datetime.utcnow()
+            trade.closed_at = datetime.now(timezone.utc)
             trade.duration_seconds = int((trade.closed_at - trade.opened_at).total_seconds())
             trade.exit_reason = reason
             trade.binance_order_id_exit = str(order.get('orderId', ''))

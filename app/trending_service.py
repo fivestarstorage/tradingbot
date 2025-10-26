@@ -5,7 +5,7 @@ from .models import NewsArticle
 
 
 def compute_trending(db: Session, hours: int = 6, limit: int = 15):
-    since = datetime.utcnow() - timedelta(hours=hours)
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
     rows = db.query(NewsArticle).filter(NewsArticle.created_at >= since).order_by(NewsArticle.created_at.desc()).all()
     counts = Counter()
     pos = defaultdict(int)

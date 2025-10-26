@@ -140,7 +140,7 @@ class PortfolioManager:
         """Calculate news sentiment score for an asset"""
         try:
             # Get news from last 24 hours
-            since = datetime.utcnow() - timedelta(hours=24)
+            since = datetime.now(timezone.utc) - timedelta(hours=24)
             news = db.query(NewsArticle).filter(
                 NewsArticle.tickers.like(f'%{asset}%'),
                 NewsArticle.created_at >= since
@@ -258,7 +258,7 @@ class PortfolioManager:
     
     def get_news_for_asset(self, db: Session, asset: str, hours: int = 6):
         """Get recent news mentioning this asset."""
-        since = datetime.utcnow() - timedelta(hours=hours)
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
         
         news = db.query(NewsArticle).filter(
             NewsArticle.created_at >= since,
@@ -540,7 +540,7 @@ Trading philosophy:
                 }
                 
                 analysis = self.analyze_holding(db, fake_holding)
-                item.last_checked_at = datetime.utcnow()
+                item.last_checked_at = datetime.now(timezone.utc)
                 
                 hybrid_score = analysis.get('hybrid_score', 0)
                 ml_pred = analysis.get('ml_prediction')
