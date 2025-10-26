@@ -395,10 +395,16 @@ def scrape_binance_square():
         # Wait for content to load
         time.sleep(5)
         
-        # Scroll to load more posts
-        for i in range(2):
+        # Scroll down multiple times to load more posts
+        print("[Binance Square] Scrolling to load more posts...")
+        for i in range(8):  # Increased from 2 to 8 scrolls
             driver.execute_script("window.scrollBy(0, 1000);")
-            time.sleep(1)
+            time.sleep(1.5)  # Slightly longer delay for content to load
+            if i % 2 == 0:
+                # Check how many posts we have so far
+                temp_soup = BeautifulSoup(driver.page_source, 'lxml')
+                temp_cards = temp_soup.select('div.feed-card')
+                print(f"[Binance Square] After {i+1} scrolls: {len(temp_cards)} posts loaded")
         
         # Parse HTML
         html = driver.page_source
@@ -406,7 +412,7 @@ def scrape_binance_square():
         
         # Find all feed cards
         feed_cards = soup.select('div.feed-card')
-        print(f"[Binance Square] Found {len(feed_cards)} posts")
+        print(f"[Binance Square] Final count: {len(feed_cards)} posts")
         
         articles = []
         
@@ -414,7 +420,7 @@ def scrape_binance_square():
         openai_key = os.getenv('OPENAI_API_KEY')
         client = OpenAI(api_key=openai_key) if openai_key else None
         
-        for idx, card in enumerate(feed_cards[:15], 1):  # Limit to 15 posts
+        for idx, card in enumerate(feed_cards[:25], 1):  # Increased from 15 to 25 posts
             try:
                 # Extract content
                 content_elem = card.select_one('[class*="content"]') or card.select_one('p')
