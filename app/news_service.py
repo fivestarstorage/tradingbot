@@ -495,57 +495,64 @@ def scrape_binance_square():
                 sentiment = 'Neutral'
                 tickers = []
                 
+                # Extract tickers using regex first (from both title and content)
+                # Match $SYMBOL or common crypto symbols
+                ticker_pattern = r'\$([A-Z]{2,10})\b'
+                combined_text = f"{title} {full_text}"
+                matches = re.findall(ticker_pattern, combined_text)
+                tickers = list(set(matches))
+                
+                # Also look for common crypto names without $ symbol
+                common_cryptos = {
+                    'BITCOIN': 'BTC', 'BTC': 'BTC',
+                    'ETHEREUM': 'ETH', 'ETH': 'ETH',
+                    'SOLANA': 'SOL', 'SOL': 'SOL',
+                    'RIPPLE': 'XRP', 'XRP': 'XRP',
+                    'DOGE': 'DOGE', 'DOGECOIN': 'DOGE',
+                    'SHIB': 'SHIB', 'SHIBA': 'SHIB',
+                    'CARDANO': 'ADA', 'ADA': 'ADA',
+                    'MATIC': 'MATIC', 'POLYGON': 'MATIC',
+                    'AVAX': 'AVAX', 'AVALANCHE': 'AVAX'
+                }
+                combined_upper = combined_text.upper()
+                for name, ticker in common_cryptos.items():
+                    if re.search(r'\b' + name + r'\b', combined_upper):
+                        if ticker not in tickers:
+                            tickers.append(ticker)
+                
                 if client:
                     try:
-                        # Extract tickers using regex first (faster)
-                        ticker_pattern = r'\$([A-Z]{2,10})(?:\s|$|[.,!?])'
-                        matches = re.findall(ticker_pattern, full_text)
-                        tickers = list(set(matches))
-                        
-                        # Use OpenAI for sentiment
+                        # Use OpenAI for sentiment and ticker extraction in one call
                         response = client.chat.completions.create(
                             model='gpt-4o-mini',
                             messages=[
                                 {
                                     'role': 'system',
-                                    'content': 'You are a crypto news sentiment analyzer. Analyze the sentiment of the given text and return ONLY one word: Positive, Negative, or Neutral. Always respond with valid JSON.'
+                                    'content': 'You are a crypto analyst. Extract: 1) sentiment (Positive/Negative/Neutral) and 2) crypto tickers mentioned. Return JSON: {"sentiment": "...", "tickers": ["...", "..."]}. Always respond with valid JSON.'
                                 },
                                 {
                                     'role': 'user',
-                                    'content': f"Analyze the sentiment:\n\n{full_text[:500]}"
+                                    'content': f"Analyze this crypto post:\n\n{full_text[:500]}"
                                 }
                             ],
                             temperature=0.3,
-                            max_tokens=50
+                            max_tokens=150
                         )
-                        sentiment_text = response.choices[0].message.content.strip()
-                        if sentiment_text in ['Positive', 'Negative', 'Neutral']:
-                            sentiment = sentiment_text
-                        
-                        # If no tickers found via regex, try AI extraction
-                        if not tickers:
-                            ticker_response = client.chat.completions.create(
-                                model='gpt-4o-mini',
-                                messages=[
-                                    {
-                                        'role': 'system',
-                                        'content': 'Extract cryptocurrency tickers mentioned in the text. Return a JSON array of ticker symbols (without $ prefix). If none found, return []. Always respond with valid JSON.'
-                                    },
-                                    {
-                                        'role': 'user',
-                                        'content': f"Extract tickers from:\n\n{full_text[:500]}"
-                                    }
-                                ],
-                                temperature=0.3,
-                                max_tokens=100
-                            )
-                            ticker_text = ticker_response.choices[0].message.content.strip()
-                            try:
-                                tickers = json.loads(ticker_text)
-                                if not isinstance(tickers, list):
-                                    tickers = []
-                            except:
-                                tickers = []
+                        result = response.choices[0].message.content.strip()
+                        try:
+                            data = json.loads(result)
+                            if data.get('sentiment') in ['Positive', 'Negative', 'Neutral']:
+                                sentiment = data['sentiment']
+                            if isinstance(data.get('tickers'), list):
+                                for t in data['tickers']:
+                                    if t and t not in tickers:
+                                        tickers.append(t)
+                        except:
+                            # Fallback: just extract sentiment
+                            if 'positive' in result.lower():
+                                sentiment = 'Positive'
+                            elif 'negative' in result.lower():
+                                sentiment = 'Negative'
                     except Exception as e:
                         print(f"  ⚠️  AI analysis failed for post {idx}: {e}")
                         sentiment = 'Neutral'
