@@ -24,7 +24,7 @@ try:
         for i, article in enumerate(articles[:10], 1):
             print(f"\n{i}. {article['title'][:70]}")
             print(f"   Tickers: {', '.join(article['tickers']) or 'None'}")
-            print(f"   Time: {article['timestamp']}")
+            print(f"   Date: {article['date']}")
     else:
         print("\n⚠️  No articles scraped")
     

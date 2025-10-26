@@ -395,16 +395,31 @@ def scrape_binance_square():
         # Wait for content to load
         time.sleep(5)
         
-        # Scroll down multiple times to load more posts
-        print("[Binance Square] Scrolling to load more posts...")
-        for i in range(8):  # Increased from 2 to 8 scrolls
+        # Scroll down extensively to load many posts
+        print("[Binance Square] Scrolling to load more posts (this may take ~60 seconds)...")
+        last_count = 0
+        no_new_posts_count = 0
+        
+        for i in range(50):  # Increased to 50 scrolls
             driver.execute_script("window.scrollBy(0, 1000);")
-            time.sleep(1.5)  # Slightly longer delay for content to load
-            if i % 2 == 0:
-                # Check how many posts we have so far
+            time.sleep(1.2)  # Balanced delay
+            
+            # Check progress every 5 scrolls
+            if i % 5 == 0:
                 temp_soup = BeautifulSoup(driver.page_source, 'lxml')
                 temp_cards = temp_soup.select('div.feed-card')
-                print(f"[Binance Square] After {i+1} scrolls: {len(temp_cards)} posts loaded")
+                current_count = len(temp_cards)
+                print(f"[Binance Square] After {i+1} scrolls: {current_count} posts loaded")
+                
+                # Stop early if no new posts are loading (reached the end)
+                if current_count == last_count:
+                    no_new_posts_count += 1
+                    if no_new_posts_count >= 3:  # If no new posts after 3 checks (15 scrolls)
+                        print(f"[Binance Square] No new posts loading, stopping early at scroll {i+1}")
+                        break
+                else:
+                    no_new_posts_count = 0
+                    last_count = current_count
         
         # Parse HTML
         html = driver.page_source
@@ -420,7 +435,7 @@ def scrape_binance_square():
         openai_key = os.getenv('OPENAI_API_KEY')
         client = OpenAI(api_key=openai_key) if openai_key else None
         
-        for idx, card in enumerate(feed_cards[:25], 1):  # Increased from 15 to 25 posts
+        for idx, card in enumerate(feed_cards[:50], 1):  # Increased to 50 posts
             try:
                 # Extract content
                 content_elem = card.select_one('[class*="content"]') or card.select_one('p')
