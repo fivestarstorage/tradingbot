@@ -371,6 +371,7 @@ def scrape_binance_square():
     Scrapes latest posts from Binance Square using Selenium.
     Returns a list of article dictionaries with sentiment and tickers analyzed by AI.
     """
+    driver = None
     try:
         print("[Binance Square] Starting scrape...")
         
@@ -382,8 +383,10 @@ def scrape_binance_square():
         chrome_options.add_argument('--disable-blink-features=AutomationControlled')
         chrome_options.add_argument('--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36')
         
+        print("[Binance Square] Initializing Chrome driver...")
         driver = webdriver.Chrome(options=chrome_options)
         driver.set_page_load_timeout(30)
+        print("[Binance Square] Chrome driver initialized successfully")
         
         # Navigate to Binance Square
         url = "https://www.binance.com/en/square"
@@ -400,7 +403,6 @@ def scrape_binance_square():
         # Parse HTML
         html = driver.page_source
         soup = BeautifulSoup(html, 'lxml')
-        driver.quit()
         
         # Find all feed cards
         feed_cards = soup.select('div.feed-card')
@@ -556,11 +558,15 @@ def scrape_binance_square():
         print(f"[Binance Square] Error: {e}")
         import traceback
         traceback.print_exc()
-        try:
-            driver.quit()
-        except:
-            pass
         return []
+    finally:
+        # Always close the driver
+        if driver:
+            try:
+                driver.quit()
+                print("[Binance Square] Chrome driver closed")
+            except Exception as e:
+                print(f"[Binance Square] Error closing driver: {e}")
 
 
 def fetch_and_store_news(db: Session, api_key: str):
@@ -589,9 +595,15 @@ def fetch_and_store_news(db: Session, api_key: str):
     cointelegraph_items = scrape_cointelegraph_rss()
     items.extend(cointelegraph_items)
     
-    # Also fetch from Binance Square
-    binance_square_items = scrape_binance_square()
-    items.extend(binance_square_items)
+    # Also fetch from Binance Square (with error handling - Selenium can be flaky)
+    try:
+        binance_square_items = scrape_binance_square()
+        items.extend(binance_square_items)
+        print(f"[News] Fetched {len(binance_square_items)} from Binance Square")
+    except Exception as e:
+        print(f"[News] Binance Square scraping failed (skipping): {e}")
+        import traceback
+        traceback.print_exc()
     
     inserted = 0
     skipped = 0

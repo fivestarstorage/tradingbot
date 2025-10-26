@@ -2,7 +2,7 @@ import os
 from typing import Dict, Any, List
 from openai import OpenAI
 from sqlalchemy.orm import Session
-from .models import NewsArticle, Signal
+from .models import NewsArticle, Signal, BotLog
 
 
 SYSTEM_PROMPT = (
@@ -25,8 +25,33 @@ class AIDecider:
         # fetch latest articles for symbols by ticker field containment
         # naive: filter by substring in tickers column
         articles = db.query(NewsArticle).order_by(NewsArticle.date.desc()).limit(200).all()
+        
+        log_msg = f"AI Decider: Found {len(articles)} total articles, analyzing {len(symbols)} symbols"
+        print(f"[AI Decider] {log_msg}")
+        try:
+            db.add(BotLog(level='INFO', category='AI', message=log_msg))
+            db.commit()
+        except:
+            pass
+        
         relevant = [a for a in articles if any(s.replace('USDT','') in (a.tickers or '') for s in symbols)]
+        
+        log_msg2 = f"AI Decider: Found {len(relevant)} relevant articles for these symbols"
+        print(f"[AI Decider] {log_msg2}")
+        try:
+            db.add(BotLog(level='INFO', category='AI', message=log_msg2))
+            db.commit()
+        except:
+            pass
+        
         if not relevant:
+            log_msg3 = f"AI Decider: No relevant articles found - cannot generate signals"
+            print(f"[AI Decider] {log_msg3}")
+            try:
+                db.add(BotLog(level='WARNING', category='AI', message=log_msg3))
+                db.commit()
+            except:
+                pass
             return []
 
         items = [
@@ -97,26 +122,28 @@ class AIDecider:
                 action = 'HOLD'
                 confidence = 50
                 reasoning = 'Mixed or insufficient sentiment (fallback)'
-                if c['pos'] >= 2 and c['neg'] == 0:
+                
+                # LOWERED THRESHOLDS - generate signals with ANY news
+                if c['pos'] >= 1 and c['neg'] == 0:
                     action = 'BUY'
-                    confidence = 70
-                    reasoning = f"Positive news count {c['pos']} with no negatives (fallback)"
-                elif c['neg'] >= 2 and c['pos'] == 0:
+                    confidence = 65
+                    reasoning = f"Positive news ({c['pos']} articles) with no negatives (fallback)"
+                elif c['neg'] >= 1 and c['pos'] == 0:
                     action = 'SELL'
-                    confidence = 70
-                    reasoning = f"Negative news count {c['neg']} with no positives (fallback)"
-                elif c['pos'] > c['neg'] and c['pos'] >= 2:
+                    confidence = 65
+                    reasoning = f"Negative news ({c['neg']} articles) with no positives (fallback)"
+                elif c['pos'] > c['neg'] and c['pos'] >= 1:
                     action = 'BUY'
-                    confidence = 60
-                    reasoning = f"More positive ({c['pos']}) than negative ({c['neg']}) news"
-                elif c['neg'] > c['pos'] and c['neg'] >= 2:
-                    action = 'SELL'
-                    confidence = 60
-                    reasoning = f"More negative ({c['neg']}) than positive ({c['pos']}) news"
-                elif c['pos'] > 0 or c['neg'] > 0:
-                    # Generate HOLD signal if there's ANY news, even if it doesn't meet thresholds
-                    reasoning = f"News sentiment: {c['pos']} positive, {c['neg']} negative (fallback HOLD)"
                     confidence = 55
+                    reasoning = f"More positive ({c['pos']}) than negative ({c['neg']}) news (fallback)"
+                elif c['neg'] > c['pos'] and c['neg'] >= 1:
+                    action = 'SELL'
+                    confidence = 55
+                    reasoning = f"More negative ({c['neg']}) than positive ({c['pos']}) news (fallback)"
+                elif c['pos'] > 0 or c['neg'] > 0:
+                    # Generate HOLD signal if there's ANY news
+                    reasoning = f"News sentiment: {c['pos']} positive, {c['neg']} negative (fallback HOLD)"
+                    confidence = 50
                 
                 print(f"[AI Decider] Fallback decision for {s}: {action} ({confidence}%) - {reasoning}")
                 decisions.append({
@@ -128,6 +155,15 @@ class AIDecider:
                 })
 
         signals: List[Signal] = []
+        print(f"[AI Decider] Processing {len(decisions)} decisions")
+        
+        log_msg_decisions = f"AI Decider: Processing {len(decisions)} decisions from OpenAI/fallback"
+        try:
+            db.add(BotLog(level='INFO', category='AI', message=log_msg_decisions))
+            db.commit()
+        except:
+            pass
+        
         for d in decisions:
             sig = Signal(
                 symbol=d.get('symbol'),
@@ -139,8 +175,26 @@ class AIDecider:
             )
             db.add(sig)
             signals.append(sig)
+            print(f"[AI Decider] Created signal: {sig.symbol} {sig.action} ({sig.confidence}%)")
+        
         if signals:
             db.commit()
+            log_msg_success = f"AI Decider: Created {len(signals)} signals - {', '.join([f'{s.symbol} {s.action}' for s in signals[:5]])}{'...' if len(signals) > 5 else ''}"
+            print(f"[AI Decider] {log_msg_success}")
+            try:
+                db.add(BotLog(level='INFO', category='AI', message=log_msg_success))
+                db.commit()
+            except:
+                pass
+        else:
+            log_msg_none = f"AI Decider: No signals generated from {len(decisions)} decisions"
+            print(f"[AI Decider] {log_msg_none}")
+            try:
+                db.add(BotLog(level='WARNING', category='AI', message=log_msg_none))
+                db.commit()
+            except:
+                pass
+        
         return signals
 
 
