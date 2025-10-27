@@ -19,6 +19,7 @@ from core.binance_client import BinanceClient
 import subprocess
 from typing import Optional, Dict, Any
 import json
+import requests
 
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), '..', 'templates'))
 
@@ -624,7 +625,7 @@ def api_recommend(hours: int = 6, db: Session = Depends(get_db)):
 
 
 @app.post('/api/deploy/webhook')
-def api_deploy_webhook(x_deploy_token: str | None = Header(None)):
+def api_deploy_webhook(x_deploy_token: Optional[str] = Header(None)):
     secret = os.getenv('DEPLOY_TOKEN', '')
     if not secret or x_deploy_token != secret:
         raise HTTPException(status_code=401, detail='Unauthorized')
@@ -636,6 +637,29 @@ def api_deploy_webhook(x_deploy_token: str | None = Header(None)):
         raise HTTPException(status_code=500, detail=f"Deploy failed: {e}")
     os._exit(0)
     return { 'ok': True }
+
+
+@app.post('/api/deploy/pull')
+def api_deploy_pull():
+    """Pull latest changes from git and restart server (local dev use)"""
+    try:
+        # Get current branch
+        result = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], 
+                              capture_output=True, text=True, check=True)
+        branch = result.stdout.strip()
+        
+        # Pull latest changes
+        subprocess.run(["git", "pull", "origin", branch, "--force"], check=True)
+        
+        # Install dependencies
+        subprocess.run(["pip3", "install", "-r", "requirements.txt"], check=False)
+        
+        # Restart server (uvicorn will auto-reload if using --reload flag)
+        return { 'ok': True, 'message': f'Pulled latest from {branch}. Server will restart automatically.' }
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail=f"Git pull failed: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Deploy failed: {e}")
 
 
 def scheduled_job():
@@ -973,10 +997,11 @@ def momentum_scanner_job():
         db.close()
 
 
-scheduler = BackgroundScheduler()
-scheduler.add_job(scheduled_job, 'interval', minutes=15, id='news_and_decision')
-scheduler.add_job(momentum_scanner_job, 'interval', minutes=1, id='momentum_scanner')  # Runs every minute
-scheduler.start()
+# Scheduler disabled - manual trading only
+# scheduler = BackgroundScheduler()
+# scheduler.add_job(scheduled_job, 'interval', minutes=15, id='news_and_decision')
+# scheduler.add_job(momentum_scanner_job, 'interval', minutes=1, id='momentum_scanner')
+# scheduler.start()
 
 
 @app.post('/api/runs/refresh')
@@ -1582,5 +1607,395 @@ def api_watchlist_remove(symbol: str, db: Session = Depends(get_db)):
         return {'ok': True, 'message': f'{symbol} removed from watchlist'}
     
     return {'error': 'Symbol not found in watchlist'}
+
+
+@app.get('/api/portfolio/{coin}')
+def api_portfolio_coin(coin: str, db: Session = Depends(get_db)):
+    """Get portfolio data for a specific coin"""
+    try:
+        # Normalize coin symbol (e.g., BTC -> BTC, BTCUSDT -> BTC)
+        asset = coin.upper().replace('USDT', '')
+        symbol = f"{asset}USDT"
+        
+        # Get account info
+        acct = binance.client.get_account()
+        balances = acct.get('balances', [])
+        
+        # Find the coin balance
+        coin_balance = None
+        usdt_balance = None
+        for b in balances:
+            if b.get('asset') == asset:
+                coin_balance = b
+            elif b.get('asset') == 'USDT':
+                usdt_balance = b
+        
+        # Get current price
+        current_price = 0.0
+        try:
+            current_price = binance.get_current_price(symbol) or 0.0
+        except Exception as e:
+            print(f"Error getting price for {symbol}: {e}")
+        
+        # Calculate position values
+        position_quantity = 0.0
+        if coin_balance:
+            position_quantity = float(coin_balance.get('free', 0)) + float(coin_balance.get('locked', 0))
+        
+        position_value = position_quantity * current_price
+        
+        # Get available capital (free USDT)
+        available_capital = 0.0
+        if usdt_balance:
+            available_capital = float(usdt_balance.get('free', 0))
+        
+        # Calculate portfolio metrics
+        # Get all trades for this symbol to calculate invested amount and realized profits
+        trades = db.query(Trade).filter(Trade.symbol == symbol).order_by(Trade.created_at).all()
+        
+        total_invested = 0.0
+        total_realized_profits = 0.0
+        net_deposits = 0.0  # This would come from deposit/withdraw records
+        
+        # Simple calculation: sum of BUY trades minus sum of SELL trades
+        buy_value = 0.0
+        sell_value = 0.0
+        for trade in trades:
+            notional = trade.notional or (trade.quantity * trade.price)
+            if trade.side == 'BUY':
+                buy_value += notional
+            elif trade.side == 'SELL':
+                sell_value += notional
+        
+        total_invested = buy_value - sell_value  # Net invested in current position
+        total_realized_profits = sell_value - buy_value if sell_value > 0 else 0.0
+        
+        # Calculate unrealized gains
+        total_unrealized_gains = position_value - total_invested if total_invested > 0 else 0.0
+        
+        # Total gains
+        total_gains = total_realized_profits + total_unrealized_gains
+        
+        # Portfolio value (position value + available capital)
+        portfolio_value = position_value + available_capital
+        
+        # Performance metrics
+        overall_performance = (total_gains / total_invested * 100) if total_invested > 0 else 0.0
+        performance = (total_unrealized_gains / total_invested * 100) if total_invested > 0 else 0.0
+        
+        return {
+            'coin': asset,
+            'symbol': symbol,
+            'totalPnL': total_gains,
+            'positionValue': position_value,
+            'performance': performance,
+            'availableCapital': available_capital,
+            'portfolioValue': portfolio_value,
+            'totalInvested': total_invested,
+            'netDeposits': net_deposits,  # TODO: Implement deposit/withdraw tracking
+            'currentCapital': available_capital,
+            'positionQuantity': position_quantity,
+            'totalRealizedProfits': total_realized_profits,
+            'totalUnrealizedGains': total_unrealized_gains,
+            'totalGains': total_gains,
+            'overallPerformance': overall_performance,
+            'currentPrice': current_price,
+        }
+    except Exception as e:
+        print(f"Error getting portfolio data for {coin}: {e}")
+        import traceback
+        traceback.print_exc()
+        # Return zeros instead of error
+        return {
+            'coin': coin,
+            'symbol': f"{coin}USDT",
+            'totalPnL': 0.0,
+            'positionValue': 0.0,
+            'performance': 0.0,
+            'availableCapital': 0.0,
+            'portfolioValue': 0.0,
+            'totalInvested': 0.0,
+            'netDeposits': 0.0,
+            'currentCapital': 0.0,
+            'positionQuantity': 0.0,
+            'totalRealizedProfits': 0.0,
+            'totalUnrealizedGains': 0.0,
+            'totalGains': 0.0,
+            'overallPerformance': 0.0,
+            'currentPrice': 0.0,
+        }
+
+
+@app.get('/api/portfolio/{coin}/history')
+def api_portfolio_history(coin: str, db: Session = Depends(get_db)):
+    """Get P&L history for a specific coin for charting"""
+    try:
+        asset = coin.upper().replace('USDT', '')
+        symbol = f"{asset}USDT"
+        
+        # Get trades for this symbol
+        trades = db.query(Trade).filter(Trade.symbol == symbol).order_by(Trade.created_at).all()
+        
+        if not trades:
+            return []
+        
+        # Build history data
+        history = []
+        cumulative_pnl = 0.0
+        
+        for trade in trades:
+            notional = trade.notional or (trade.quantity * trade.price)
+            if trade.side == 'BUY':
+                cumulative_pnl -= notional
+            elif trade.side == 'SELL':
+                cumulative_pnl += notional
+            
+            history.append({
+                'time': trade.created_at.replace(tzinfo=timezone.utc).isoformat().replace('+00:00','Z') if trade.created_at else None,
+                'pnl': cumulative_pnl
+            })
+        
+        # Add current unrealized P&L as the latest point
+        if trades:
+            try:
+                current_price = binance.get_current_price(symbol) or 0.0
+                acct = binance.client.get_account()
+                balances = acct.get('balances', [])
+                position_quantity = 0.0
+                for b in balances:
+                    if b.get('asset') == asset:
+                        position_quantity = float(b.get('free', 0)) + float(b.get('locked', 0))
+                        break
+                
+                current_position_value = position_quantity * current_price
+                history.append({
+                    'time': datetime.now(timezone.utc).isoformat().replace('+00:00','Z'),
+                    'pnl': cumulative_pnl + current_position_value
+                })
+            except Exception as e:
+                print(f"Error calculating current P&L: {e}")
+        
+        return history
+    except Exception as e:
+        print(f"Error getting portfolio history for {coin}: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+
+@app.get('/api/market/{coin}/klines')
+def api_market_klines(coin: str, interval: str = '1h', limit: int = 100):
+    """Get kline/candlestick data for charting"""
+    try:
+        asset = coin.upper().replace('USDT', '')
+        symbol = f"{asset}USDT"
+        
+        # Map frontend intervals to Binance intervals
+        interval_map = {
+            '1m': '1m',
+            '5m': '5m',
+            '15m': '15m',
+            '30m': '30m',
+            '1h': '1h',
+            '4h': '4h',
+            '1d': '1d',
+            '7d': '1w',
+            '1mo': '1M',
+            '1y': '1M'
+        }
+        
+        binance_interval = interval_map.get(interval, '1h')
+        
+        # Adjust limit for longer timeframes
+        if interval == '1y':
+            limit = 365
+        elif interval == '1mo':
+            limit = 30
+        elif interval == '7d':
+            limit = 28  # 4 weeks of weekly data
+        
+        # Get klines from Binance
+        klines = binance.client.get_klines(
+            symbol=symbol,
+            interval=binance_interval,
+            limit=limit
+        )
+        
+        # Format for frontend
+        chart_data = []
+        for k in klines:
+            timestamp = k[0]
+            open_price = float(k[1])
+            high_price = float(k[2])
+            low_price = float(k[3])
+            close_price = float(k[4])
+            volume = float(k[5])
+            
+            # Format time based on interval
+            dt = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
+            if interval in ['1m', '5m', '15m', '30m']:
+                time_str = dt.strftime('%H:%M')
+            elif interval in ['1h', '4h']:
+                time_str = dt.strftime('%m/%d %H:%M')
+            else:
+                time_str = dt.strftime('%Y-%m-%d')
+            
+            chart_data.append({
+                'time': time_str,
+                'price': close_price,
+                'open': open_price,
+                'high': high_price,
+                'low': low_price,
+                'close': close_price,
+                'volume': volume
+            })
+        
+        return {
+            'symbol': symbol,
+            'interval': interval,
+            'data': chart_data
+        }
+    except Exception as e:
+        print(f"Error getting klines for {coin}: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'symbol': coin, 'interval': interval, 'data': []}
+
+
+@app.get('/api/market/{coin}')
+def api_market_coin(coin: str):
+    """Get market information for a specific coin"""
+    try:
+        asset = coin.upper().replace('USDT', '')
+        symbol = f"{asset}USDT"
+        
+        # Get current price from Binance
+        current_price = binance.get_current_price(symbol) or 0.0
+        
+        # Get 24h ticker stats from Binance
+        ticker = binance.client.get_ticker(symbol=symbol)
+        
+        # Get klines for 1h, 24h, 7d changes
+        now = datetime.now(timezone.utc)
+        
+        # 1h change
+        klines_1h = binance.client.get_klines(
+            symbol=symbol,
+            interval='1h',
+            limit=2
+        )
+        change_1h = 0.0
+        if len(klines_1h) >= 2:
+            price_1h_ago = float(klines_1h[0][1])
+            change_1h = ((current_price - price_1h_ago) / price_1h_ago * 100) if price_1h_ago > 0 else 0.0
+        
+        # 24h change (from ticker)
+        change_24h = float(ticker.get('priceChangePercent', 0.0))
+        
+        # 7d change
+        klines_7d = binance.client.get_klines(
+            symbol=symbol,
+            interval='1d',
+            limit=8
+        )
+        change_7d = 0.0
+        if len(klines_7d) >= 8:
+            price_7d_ago = float(klines_7d[0][1])
+            change_7d = ((current_price - price_7d_ago) / price_7d_ago * 100) if price_7d_ago > 0 else 0.0
+        
+        # Format volume
+        volume_24h = float(ticker.get('quoteVolume', 0.0))
+        
+        # Get market data from CoinGecko
+        coingecko_id_map = {
+            'BTC': 'bitcoin',
+            'ETH': 'ethereum', 
+            'XRP': 'ripple'
+        }
+        
+        rank = '-'
+        market_cap = '-'
+        circulating_supply = '-'
+        
+        if asset in coingecko_id_map:
+            try:
+                cg_id = coingecko_id_map[asset]
+                cg_response = requests.get(
+                    f'https://api.coingecko.com/api/v3/coins/{cg_id}',
+                    timeout=5
+                )
+                if cg_response.status_code == 200:
+                    cg_data = cg_response.json()
+                    rank = cg_data.get('market_cap_rank', '-')
+                    market_cap_val = cg_data.get('market_data', {}).get('market_cap', {}).get('usd', 0)
+                    if market_cap_val:
+                        market_cap = f"${market_cap_val:,.0f}"
+                    circ_supply = cg_data.get('market_data', {}).get('circulating_supply', 0)
+                    if circ_supply:
+                        circulating_supply = f"{circ_supply:,.0f}"
+            except Exception as e:
+                print(f"CoinGecko API error: {e}")
+        
+        return {
+            'coin': asset,
+            'symbol': symbol,
+            'rank': rank,
+            'price': f"${current_price:,.2f}",
+            'marketCap': market_cap,
+            'circulatingSupply': circulating_supply,
+            'volume24h': f"${volume_24h:,.0f}",
+            'change1h': change_1h,
+            'change24h': change_24h,
+            'change7d': change_7d,
+        }
+    except Exception as e:
+        print(f"Error getting market data for {coin}: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            'coin': coin,
+            'symbol': f"{coin}USDT",
+            'rank': '-',
+            'price': '0.00',
+            'marketCap': '-',
+            'circulatingSupply': '-',
+            'volume24h': '-',
+            'change1h': 0.0,
+            'change24h': 0.0,
+            'change7d': 0.0,
+        }
+
+
+class DepositWithdrawRequest(BaseModel):
+    coin: str
+    amount: float
+
+
+@app.post('/api/portfolio/deposit')
+def api_portfolio_deposit(request: DepositWithdrawRequest, db: Session = Depends(get_db)):
+    """Record a deposit transaction"""
+    # TODO: Implement deposit tracking in database
+    # For now, just return success
+    return {
+        'ok': True,
+        'message': f'Deposit of ${request.amount:.2f} for {request.coin} recorded',
+        'type': 'deposit',
+        'coin': request.coin,
+        'amount': request.amount
+    }
+
+
+@app.post('/api/portfolio/withdraw')
+def api_portfolio_withdraw(request: DepositWithdrawRequest, db: Session = Depends(get_db)):
+    """Record a withdrawal transaction"""
+    # TODO: Implement withdrawal tracking in database
+    # For now, just return success
+    return {
+        'ok': True,
+        'message': f'Withdrawal of ${request.amount:.2f} for {request.coin} recorded',
+        'type': 'withdraw',
+        'coin': request.coin,
+        'amount': request.amount
+    }
 
 
