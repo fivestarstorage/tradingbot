@@ -8,14 +8,16 @@ from sqlalchemy import func
 from apscheduler.schedulers.background import BackgroundScheduler
 from pydantic import BaseModel
 from .db import Base, engine, get_db
-from .models import NewsArticle, Signal, Position, Trade, SchedulerRun, BotLog
+from .models import NewsArticle, Signal, Position, Trade, SchedulerRun, BotLog, AITradingDecision, TestPortfolio, TestTrade
 from datetime import datetime, timezone, timedelta
 from .news_service import fetch_and_store_news
 from .ai_decider import AIDecider
 from .trading_service import TradingService
 from .trending_service import compute_trending
 from .chat_service import ChatService
+from .ai_trading_engine import AITradingEngine
 from core.binance_client import BinanceClient
+from binance.client import Client
 import subprocess
 from typing import Optional, Dict, Any
 import json
@@ -45,6 +47,51 @@ app.add_middleware(
 # Init DB
 Base.metadata.create_all(bind=engine)
 
+# Initialize base coins in database if they don't exist
+def initialize_base_coins():
+    """Ensure base coins are in the TradingCoin table for AI auto-fetch"""
+    from .models import TradingCoin
+    
+    base_coins = [
+        {'coin': 'BTC', 'coin_name': 'Bitcoin', 'symbol': 'BTCUSDT'},
+        {'coin': 'ETH', 'coin_name': 'Ethereum', 'symbol': 'ETHUSDT'},
+        {'coin': 'XRP', 'coin_name': 'Ripple', 'symbol': 'XRPUSDT'},
+        {'coin': 'VIRTUAL', 'coin_name': 'Virtuals Protocol', 'symbol': 'VIRTUALUSDT'},
+        {'coin': 'PIVX', 'coin_name': 'PIVX', 'symbol': 'PIVXUSDT'},
+        {'coin': 'BNB', 'coin_name': 'Binance Coin', 'symbol': 'BNBUSDT'},
+        {'coin': 'YB', 'coin_name': 'YB', 'symbol': 'YBUSDT'},
+    ]
+    
+    db = next(get_db())
+    try:
+        for coin_data in base_coins:
+            existing = db.query(TradingCoin).filter(TradingCoin.coin == coin_data['coin']).first()
+            if not existing:
+                print(f"🔧 Initializing base coin: {coin_data['coin']}")
+                trading_coin = TradingCoin(
+                    coin=coin_data['coin'],
+                    coin_name=coin_data['coin_name'],
+                    symbol=coin_data['symbol'],
+                    enabled=True,
+                    ai_decisions_enabled=True,
+                    test_mode=True
+                )
+                db.add(trading_coin)
+            else:
+                # Update existing coins to ensure ai_decisions_enabled is True
+                if not existing.ai_decisions_enabled:
+                    print(f"🔧 Enabling AI decisions for: {coin_data['coin']}")
+                    existing.ai_decisions_enabled = True
+        db.commit()
+        print("✅ Base coins initialized")
+    except Exception as e:
+        print(f"❌ Error initializing base coins: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+initialize_base_coins()
+
 # Init services
 binance = BinanceClient(
     api_key=os.getenv('BINANCE_API_KEY', ''),
@@ -54,6 +101,10 @@ binance = BinanceClient(
 trade_service = TradingService(binance)
 ai_decider = AIDecider()
 chat_service = ChatService(binance, trade_service)
+
+# AI Trading Engine (initialized per-request to get fresh DB session)
+def get_ai_engine(db: Session = Depends(get_db)):
+    return AITradingEngine(binance, db)
 
 # Runtime overrides for simple config tweaks via API
 RUNTIME_OVERRIDES: Dict[str, Any] = {
@@ -77,7 +128,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     latest_news = db.query(NewsArticle).order_by(NewsArticle.created_at.desc()).limit(20).all()
     latest_signals = db.query(Signal).order_by(Signal.created_at.desc()).limit(20).all()
     open_positions = db.query(Position).filter(Position.status == 'OPEN').all()
-    recent_trades = db.query(Trade).order_by(Trade.created_at.desc()).limit(20).all()
+    recent_trades = db.query(Trade).order_by(Trade.executed_at.desc()).limit(20).all()
     trending = compute_trending(db, hours=6, limit=10)
     return templates.TemplateResponse('dashboard.html', {
         'request': request,
@@ -98,14 +149,14 @@ def api_news(db: Session = Depends(get_db)):
             'url': n.news_url,
             'sentiment': n.sentiment,
             'tickers': n.tickers,
-            # Dates are stored as naive UTC in DB, add Z suffix to indicate UTC
-            'date': (
-                (n.date.replace(tzinfo=timezone.utc).isoformat().replace('+00:00', 'Z'))
-                if n.date else None
+            'source': n.source_name,
+            'text': n.text,
+            # Dates are stored as naive datetime in DB
+            'published_at': (
+                n.date.replace(tzinfo=timezone.utc).isoformat() if n.date else None
             ),
             'ingested_at': (
-                (n.created_at.replace(tzinfo=timezone.utc).isoformat().replace('+00:00', 'Z'))
-                if n.created_at else None
+                n.created_at.replace(tzinfo=timezone.utc).isoformat() if n.created_at else None
             )
         } for n in items
     ]
@@ -152,6 +203,54 @@ def api_overview(db: Session = Depends(get_db)):
             'confidence': last_signal.confidence if last_signal else None,
             'created_at': last_signal.created_at.isoformat() if last_signal else None,
         }
+    }
+
+
+@app.get('/api/scheduler/status')
+def api_scheduler_status():
+    """Get status of news + AI scheduler with countdown info"""
+    global last_news_and_ai_run, scheduler_start_time
+    
+    now = datetime.now(timezone.utc)
+    interval_minutes = 15
+    
+    if last_news_and_ai_run is None:
+        # Scheduler hasn't run yet since server start
+        # Estimate: first run happens within 15 minutes of server start
+        # Use scheduler_start_time if available, otherwise assume just started
+        start_reference = scheduler_start_time if scheduler_start_time else now
+        
+        # Estimate next run: could be anywhere from now to 15 minutes from server start
+        # Let's assume it will run at the next 15-minute mark after server start
+        estimated_next_run = start_reference + timedelta(minutes=interval_minutes)
+        seconds_until_next = (estimated_next_run - now).total_seconds()
+        
+        # If negative (we've passed the estimated time), just show it's imminent
+        if seconds_until_next < 0:
+            seconds_until_next = 60  # Show 1 minute as fallback
+        
+        return {
+            'last_run': None,
+            'next_run': estimated_next_run.isoformat() + 'Z',
+            'seconds_until_next': int(seconds_until_next),
+            'interval_minutes': interval_minutes,
+            'status': 'waiting_for_first_run'
+        }
+    
+    # Calculate next run time (last run + 15 minutes)
+    next_run = last_news_and_ai_run + timedelta(minutes=interval_minutes)
+    seconds_until_next = (next_run - now).total_seconds()
+    
+    # If negative, it should have run already (might be running now)
+    if seconds_until_next < 0:
+        seconds_until_next = 0
+    
+    return {
+        'last_run': last_news_and_ai_run.isoformat() + 'Z',
+        'next_run': next_run.isoformat() + 'Z',
+        'seconds_until_next': int(seconds_until_next),
+        'interval_minutes': interval_minutes,
+        'status': 'running' if seconds_until_next < 10 else 'scheduled'
     }
 
 
@@ -269,7 +368,7 @@ def api_portfolio(db: Session = Depends(get_db)):
 
 @app.get('/api/trades')
 def api_trades(limit: int = 50, db: Session = Depends(get_db)):
-    trs = db.query(Trade).order_by(Trade.created_at.desc()).limit(limit).all()
+    trs = db.query(Trade).order_by(Trade.executed_at.desc()).limit(limit).all()
     return [
         {
             'symbol': t.symbol,
@@ -467,6 +566,247 @@ def api_health():
         return {'ok': True, 'binance': True}
     except Exception:
         return {'ok': True, 'binance': False}
+
+
+# ============================================================================
+# AI TRADING DECISION ENDPOINTS
+# ============================================================================
+
+@app.post('/api/ai/decision/{coin}')
+def api_make_ai_decision(coin: str, test_mode: bool = True, db: Session = Depends(get_db)):
+    """
+    Trigger a new AI trading decision for a coin.
+    This fetches news, runs ML predictions, analyzes market data,
+    and uses OpenAI to make a BUY/SELL/HOLD decision.
+    """
+    try:
+        ai_engine = get_ai_engine(db)
+        decision = ai_engine.make_decision(coin.upper(), test_mode=test_mode)
+        
+        # Update last fetch time for countdown tracking
+        last_ai_fetch[coin.upper()] = datetime.now(timezone.utc)
+        
+        return {
+            'ok': True,
+            'decision': decision.to_dict()
+        }
+    except Exception as e:
+        print(f"❌ Error making AI decision: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            'ok': False,
+            'error': str(e)
+        }
+
+
+@app.get('/api/ai/decisions/{coin}')
+def api_get_ai_decisions(coin: str, limit: int = 20, db: Session = Depends(get_db)):
+    """
+    Get past AI trading decisions for a coin
+    """
+    try:
+        decisions = db.query(AITradingDecision)\
+            .filter(AITradingDecision.coin == coin.upper())\
+            .order_by(AITradingDecision.created_at.desc())\
+            .limit(limit)\
+            .all()
+        
+        # Calculate price change % between consecutive decisions
+        decisions_list = []
+        for i, decision in enumerate(decisions):
+            d = decision.to_dict()
+            
+            # Calculate price change since previous decision
+            if i < len(decisions) - 1:
+                prev_decision = decisions[i + 1]  # Next in list (older in time)
+                if decision.current_price and prev_decision.current_price and prev_decision.current_price > 0:
+                    price_change_pct = ((decision.current_price - prev_decision.current_price) / prev_decision.current_price) * 100
+                    d['price_change_since_last'] = round(price_change_pct, 2)
+                else:
+                    d['price_change_since_last'] = None
+            else:
+                d['price_change_since_last'] = None  # First/oldest decision
+            
+            decisions_list.append(d)
+        
+        return {
+            'ok': True,
+            'coin': coin.upper(),
+            'count': len(decisions),
+            'decisions': decisions_list
+        }
+    except Exception as e:
+        print(f"❌ Error getting AI decisions: {e}")
+        return {
+            'ok': False,
+            'error': str(e)
+        }
+
+
+@app.get('/api/ai/decisions/{coin}/latest')
+def api_get_latest_ai_decision(coin: str, db: Session = Depends(get_db)):
+    """
+    Get the latest AI trading decision for a coin
+    """
+    try:
+        decision = db.query(AITradingDecision)\
+            .filter(AITradingDecision.coin == coin.upper())\
+            .order_by(AITradingDecision.created_at.desc())\
+            .first()
+        
+        if decision:
+            return {
+                'ok': True,
+                'decision': decision.to_dict()
+            }
+        else:
+            return {
+                'ok': False,
+                'error': 'No decisions found for this coin'
+            }
+    except Exception as e:
+        print(f"❌ Error getting latest AI decision: {e}")
+        return {
+            'ok': False,
+            'error': str(e)
+        }
+
+
+@app.get('/api/ai/trades/{coin}')
+def api_get_trade_analytics(coin: str, test_mode: bool = True, db: Session = Depends(get_db)):
+    """
+    Get comprehensive trade analytics for learning and analysis
+    """
+    try:
+        asset = coin.upper()
+        
+        if test_mode:
+            trades = db.query(TestTrade).filter(TestTrade.coin == asset).order_by(TestTrade.executed_at.desc()).limit(50).all()
+            
+            analytics = {
+                'ok': True,
+                'coin': asset,
+                'total_trades': len(trades),
+                'trades': [t.to_dict() for t in trades],
+                'summary': {
+                    'total_buys': sum(1 for t in trades if t.side == 'BUY'),
+                    'total_sells': sum(1 for t in trades if t.side == 'SELL'),
+                    'profitable_sells': sum(1 for t in trades if t.side == 'SELL' and t.pnl and t.pnl > 0),
+                    'avg_pnl': sum(t.pnl for t in trades if t.pnl) / max(1, sum(1 for t in trades if t.pnl)),
+                    'avg_holding_period_hours': sum(t.holding_period_seconds or 0 for t in trades) / max(1, sum(1 for t in trades if t.holding_period_seconds)) / 3600,
+                    'best_trade_pnl': max((t.pnl for t in trades if t.pnl), default=0),
+                    'worst_trade_pnl': min((t.pnl for t in trades if t.pnl), default=0),
+                }
+            }
+            
+            return analytics
+        else:
+            return {'ok': False, 'error': 'Real mode trade analytics not yet implemented'}
+    except Exception as e:
+        print(f"❌ Error getting trade analytics: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'ok': False, 'error': str(e)}
+
+
+@app.get('/api/ai/next-fetch/{coin}')
+def api_get_next_fetch_time(coin: str):
+    """
+    Get the time until next auto-fetch for a coin
+    """
+    try:
+        coin = coin.upper()
+        last_fetch = last_ai_fetch.get(coin)
+        
+        if last_fetch is None:
+            # No fetch yet, will happen soon
+            return {
+                'ok': True,
+                'last_fetch': None,
+                'next_fetch_in_seconds': 900,  # 15 minutes
+                'message': 'First fetch pending'
+            }
+        
+        # Calculate time since last fetch
+        now = datetime.now(timezone.utc)
+        time_since_fetch = (now - last_fetch).total_seconds()
+        
+        # Next fetch is 900 seconds (15 minutes) after last fetch
+        time_until_next = 900 - time_since_fetch
+        
+        # If we're past the scheduled time, show 0 (fetch is happening now or about to)
+        if time_until_next <= 0:
+            time_until_next = 0
+        
+        return {
+            'ok': True,
+            'last_fetch': last_fetch.isoformat(),
+            'next_fetch_in_seconds': int(time_until_next),
+            'message': f'Next fetch in {int(time_until_next)} seconds'
+        }
+    except Exception as e:
+        print(f"❌ Error getting next fetch time: {e}")
+        return {
+            'ok': False,
+            'error': str(e)
+        }
+
+
+@app.get('/api/klines/{coin}/{timeframe}')
+def api_get_klines(coin: str, timeframe: str = '1h'):
+    """
+    Get historical kline/candlestick data for charting
+    """
+    try:
+        symbol = f"{coin.upper()}USDT"
+        
+        # Map timeframe to Binance interval
+        interval_map = {
+            '1m': Client.KLINE_INTERVAL_1MINUTE,
+            '5m': Client.KLINE_INTERVAL_5MINUTE,
+            '15m': Client.KLINE_INTERVAL_15MINUTE,
+            '30m': Client.KLINE_INTERVAL_30MINUTE,
+            '1h': Client.KLINE_INTERVAL_1HOUR,
+            '4h': Client.KLINE_INTERVAL_4HOUR,
+            '1d': Client.KLINE_INTERVAL_1DAY,
+            '7d': Client.KLINE_INTERVAL_1WEEK,
+            '1mo': Client.KLINE_INTERVAL_1MONTH,
+        }
+        
+        interval = interval_map.get(timeframe, Client.KLINE_INTERVAL_1HOUR)
+        
+        # Fetch klines from Binance
+        klines = binance.client.get_klines(
+            symbol=symbol,
+            interval=interval,
+            limit=100  # Last 100 candles
+        )
+        
+        # Format for frontend
+        formatted_klines = []
+        for kline in klines:
+            formatted_klines.append({
+                'time': int(kline[0]),  # Open time in ms
+                'open': float(kline[1]),
+                'high': float(kline[2]),
+                'low': float(kline[3]),
+                'close': float(kline[4]),
+                'volume': float(kline[5])
+            })
+        
+        return {
+            'ok': True,
+            'coin': coin.upper(),
+            'timeframe': timeframe,
+            'data': formatted_klines
+        }
+    except Exception as e:
+        print(f"❌ Error fetching klines for {coin}: {e}")
+        return {
+            'ok': False,
+            'error': str(e)
+        }
 
 
 @app.get('/api/price')
@@ -997,19 +1337,411 @@ def momentum_scanner_job():
         db.close()
 
 
-# Scheduler disabled - manual trading only
-# scheduler = BackgroundScheduler()
-# scheduler.add_job(scheduled_job, 'interval', minutes=15, id='news_and_decision')
-# scheduler.add_job(momentum_scanner_job, 'interval', minutes=1, id='momentum_scanner')
-# scheduler.start()
+# AI Trading Decision System
+last_ai_fetch = {}  # Dynamic dictionary that grows with added coins
+last_news_and_ai_run = None  # Track last time news + AI job ran
+scheduler_start_time = None  # Track when scheduler started
+ai_scheduler = BackgroundScheduler()
+
+def make_ai_decisions_for_all_coins():
+    """Make AI trading decisions for all enabled coins in the database"""
+    from .ai_trading_engine import AITradingEngine
+    from .models import TradingCoin
+    
+    print(f"\n🤖 AI Decision-making starting at {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
+    
+    db = None
+    try:
+        # Get all enabled coins from database
+        db = next(get_db())
+        enabled_coins = db.query(TradingCoin).filter(
+            TradingCoin.enabled == True,
+            TradingCoin.ai_decisions_enabled == True
+        ).all()
+        
+        if not enabled_coins:
+            print("⚠️  No enabled coins found in database. Add coins via /api/coins/add")
+            return
+        
+        print(f"📊 Found {len(enabled_coins)} enabled coins: {', '.join([c.coin for c in enabled_coins])}")
+        
+        # Process each coin
+        for trading_coin in enabled_coins:
+            coin = trading_coin.coin
+            coin_db = None
+            try:
+                # Update timestamp at START of fetch (not end) so countdown shows correctly
+                last_ai_fetch[coin] = datetime.now(timezone.utc)
+                
+                coin_db = next(get_db())
+                engine = AITradingEngine(binance, coin_db)
+                
+                # Use the coin's test_mode setting
+                decision = engine.make_decision(coin, test_mode=trading_coin.test_mode)
+                
+                # Update last_decision_at timestamp
+                trading_coin.last_decision_at = datetime.now(timezone.utc)
+                db.commit()
+                
+                print(f"✅ AI decision completed for {coin}: {decision.decision}")
+            except Exception as e:
+                print(f"❌ AI decision error for {coin}: {e}")
+                import traceback
+                traceback.print_exc()
+            finally:
+                # ALWAYS close the coin-specific database connection
+                if coin_db:
+                    try:
+                        coin_db.close()
+                    except:
+                        pass
+                # Still update timestamp so we don't retry immediately
+                last_ai_fetch[coin] = datetime.now(timezone.utc)
+    except Exception as e:
+        print(f"❌ Fatal error in make_ai_decisions_for_all_coins: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        # Close main database connection
+        if db:
+            try:
+                db.close()
+            except:
+                pass
+
+def analyze_posts_with_ai(coin: str, articles: list) -> dict:
+    """
+    Feed scraped posts to OpenAI and get trading decision
+    Returns: {'decision': 'BUY/SELL/HOLD', 'score': 0-100, 'reasoning': str}
+    """
+    import openai
+    
+    # Prepare content for AI
+    articles_text = ""
+    for i, art in enumerate(articles[:15], 1):  # Limit to 15 posts
+        content = art.get('content', '')[:400]  # Limit each article
+        articles_text += f"\n\n--- Post {i} ---\n{content}"
+    
+    prompt = f"""You are a crypto trading AI analyzing recent Binance Square posts about {coin}.
+
+RECENT POSTS FROM BINANCE SQUARE (last 15 minutes):
+{articles_text}
+
+Based on the SENTIMENT and ENTHUSIASM in these posts, provide a trading recommendation.
+
+Respond in this EXACT format:
+DECISION: [BUY/SELL/HOLD]
+SCORE: [0-100 where 0=extremely bearish, 50=neutral, 100=extremely bullish]
+REASONING: [One paragraph explanation]
+
+Consider:
+- Positive/bullish language → Higher score, potentially BUY
+- Negative/bearish language → Lower score, potentially SELL  
+- Mixed or low enthusiasm → HOLD
+- Look for actual trading sentiment, not just generic mentions
+"""
+
+    try:
+        client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a crypto trading analyst."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=500
+        )
+        
+        result = response.choices[0].message.content
+        
+        # Parse response
+        import re
+        decision = "HOLD"
+        score = 50
+        reasoning = ""
+        
+        for line in result.strip().split('\n'):
+            if line.startswith('DECISION:'):
+                decision = line.split(':', 1)[1].strip()
+            elif line.startswith('SCORE:'):
+                score_text = line.split(':', 1)[1].strip()
+                score_match = re.search(r'(\d+)', score_text)
+                if score_match:
+                    score = int(score_match.group(1))
+            elif line.startswith('REASONING:'):
+                reasoning = line.split(':', 1)[1].strip()
+        
+        # Get remaining reasoning if multiline
+        if 'REASONING:' in result:
+            reasoning_start = result.index('REASONING:') + len('REASONING:')
+            reasoning = result[reasoning_start:].strip()
+        
+        return {
+            'decision': decision,
+            'score': score,
+            'reasoning': reasoning,
+            'news_count': len(articles)
+        }
+        
+    except Exception as e:
+        print(f"  ❌ OpenAI Error for {coin}: {e}")
+        return {
+            'decision': 'HOLD',
+            'score': 50,
+            'reasoning': f'Error getting AI decision: {e}',
+            'news_count': len(articles)
+        }
+
+
+def news_and_ai_job():
+    """
+    Combined job that runs every 15 minutes:
+    1. Scrapes fresh posts from Binance Square for each coin's hashtag
+    2. Makes AI trading decisions based on sentiment/enthusiasm
+    """
+    global last_news_and_ai_run
+    from .db import SessionLocal
+    from .binance_square_scraper import BinanceSquareScraper
+    from .models import TradingCoin
+    
+    # Update timestamp at start
+    last_news_and_ai_run = datetime.now(timezone.utc)
+    
+    print("\n" + "="*80)
+    print(f"📰🤖 BINANCE SQUARE SCRAPE + AI DECISIONS - {last_news_and_ai_run.strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    print("="*80)
+    
+    db = SessionLocal()
+    
+    try:
+        # Get all enabled coins
+        enabled_coins = db.query(TradingCoin).filter(
+            TradingCoin.enabled == True,
+            TradingCoin.ai_decisions_enabled == True
+        ).all()
+        
+        if not enabled_coins:
+            print("⚠️  No enabled coins found")
+            return
+        
+        print(f"📊 Processing {len(enabled_coins)} coins: {', '.join([c.coin for c in enabled_coins])}\n")
+        
+        # Initialize scraper once for all coins
+        scraper = BinanceSquareScraper(headless=True)
+        
+        for coin_obj in enabled_coins:
+            coin = coin_obj.coin
+            
+            try:
+                print(f"\n{'='*80}")
+                print(f"💎 {coin} - Scraping & Analysis")
+                print(f"{'='*80}")
+                
+                # Scrape posts
+                print(f"📰 Scraping Binance Square #{coin} (last 15 min)...")
+                articles = scraper.fetch_articles(coin, max_articles=20, time_window_minutes=15)
+                
+                if not articles:
+                    print(f"  ⚠️  No posts found in last 15 minutes")
+                    
+                    # Store neutral decision
+                    decision_obj = AITradingDecision(
+                        coin=coin,
+                        decision='HOLD',
+                        confidence=50.0,
+                        news_count=0,
+                        news_sentiment='NEUTRAL',
+                        news_sentiment_score=50.0,
+                        news_summary='No recent posts found in last 15 minutes',
+                        ai_reasoning='No data available for analysis',
+                        current_price=0.0,
+                        test_mode=coin_obj.test_mode,
+                        executed=False,
+                        created_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                    )
+                    db.add(decision_obj)
+                    db.commit()
+                    continue
+                
+                print(f"  ✅ Found {len(articles)} posts\n")
+                
+                # Store articles in database first
+                print(f"  💾 Storing articles in database...")
+                stored_count = 0
+                seen_urls = set()
+                
+                for article in articles:
+                    url = article.get('url')
+                    
+                    # Generate unique URL for articles without one (using content hash)
+                    if not url:
+                        import hashlib
+                        content_for_hash = article.get('content', '')[:500]
+                        url_hash = hashlib.md5(content_for_hash.encode()).hexdigest()[:16]
+                        url = f"https://www.binance.com/en/square/post/generated-{url_hash}"
+                    
+                    # Skip duplicates within batch
+                    if url in seen_urls:
+                        continue
+                    seen_urls.add(url)
+                    
+                    # Skip if already exists in database
+                    existing = db.query(NewsArticle).filter(
+                        NewsArticle.news_url == url
+                    ).first()
+                    if existing:
+                        continue
+                    
+                    # Extract sentiment from content
+                    content = article.get('content', '')
+                    sentiment = 'NEUTRAL'
+                    if 'Bullish' in content:
+                        sentiment = 'BULLISH'
+                    elif 'Bearish' in content:
+                        sentiment = 'BEARISH'
+                    
+                    # Parse the post timestamp
+                    posted_at_str = article.get('posted_at')
+                    if posted_at_str:
+                        posted_at = datetime.fromisoformat(posted_at_str.replace('Z', '+00:00')).replace(tzinfo=None)
+                    else:
+                        posted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    
+                    news_article = NewsArticle(
+                        title=article.get('title', '')[:200],
+                        news_url=url,
+                        text=content,
+                        source_name='Binance Square',
+                        sentiment=sentiment,
+                        tickers=coin,
+                        created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                        date=posted_at
+                    )
+                    db.add(news_article)
+                    stored_count += 1
+                
+                db.commit()
+                print(f"  ✅ Stored {stored_count} articles in database")
+                
+                # Show sample posts
+                print(f"  📋 Sample posts:")
+                for i, art in enumerate(articles[:5], 1):
+                    content_preview = art.get('content', '')[:100].replace('\n', ' ')
+                    sentiment_icon = '🟢' if 'Bullish' in art.get('content', '') else '🔴' if 'Bearish' in art.get('content', '') else '⚪'
+                    print(f"     {i}. {sentiment_icon} {content_preview}...")
+                
+                # Get AI analysis
+                print(f"\n  🤖 Analyzing with GPT-4o-mini...")
+                ai_result = analyze_posts_with_ai(coin, articles)
+                
+                print(f"  📊 DECISION: {ai_result['decision']} (Score: {ai_result['score']}/100)")
+                print(f"  💡 {ai_result['reasoning'][:150]}...")
+                
+                # Store decision in database
+                decision_obj = AITradingDecision(
+                    coin=coin,
+                    decision=ai_result['decision'],
+                    confidence=float(ai_result['score']),
+                    news_count=ai_result['news_count'],
+                    news_sentiment=ai_result['decision'],  # Use decision as sentiment
+                    news_sentiment_score=float(ai_result['score']),
+                    news_summary=f"Analyzed {ai_result['news_count']} posts from last 15 minutes",
+                    ai_reasoning=ai_result['reasoning'],
+                    current_price=0.0,  # Will be filled by trading engine if needed
+                    test_mode=coin_obj.test_mode,
+                    executed=False,
+                    created_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                )
+                db.add(decision_obj)
+                db.commit()
+                
+                print(f"  ✅ Decision stored in database")
+                
+            except Exception as e:
+                print(f"  ❌ Error processing {coin}: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # Close scraper
+        scraper.close_driver()
+        
+    except Exception as e:
+        print(f"❌ Job failed: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    finally:
+        db.close()
+    
+    print("\n" + "="*80)
+    print("✅ BINANCE SQUARE SCRAPE + AI DECISIONS COMPLETED")
+    print("="*80 + "\n")
+
+# Community Tips Scheduler - runs every 10 minutes
+def tips_scheduled_job():
+    """
+    Scheduled job to fetch and analyze community tips from Binance Square
+    Runs every 10 minutes
+    """
+    try:
+        print("\n[TipsScheduler] Starting community tips fetch...")
+        
+        from .tips_service import fetch_and_analyze_tips
+        
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            print("[TipsScheduler] ⚠️  OPENAI_API_KEY not set, skipping tips fetch")
+            return
+        
+        db = next(get_db())
+        
+        try:
+            fetch_and_analyze_tips(db, api_key)
+            print("[TipsScheduler] ✅ Tips updated successfully")
+        except Exception as e:
+            print(f"[TipsScheduler] ❌ Error: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            db.close()
+    
+    except Exception as e:
+        print(f"[TipsScheduler] ❌ Fatal error: {e}")
+        import traceback
+        traceback.print_exc()
+
+# Start the scheduler
+scheduler_start_time = datetime.now(timezone.utc)  # Track when scheduler started
+ai_scheduler.add_job(news_and_ai_job, 'interval', minutes=15, id='news_and_ai')
+ai_scheduler.add_job(tips_scheduled_job, 'interval', minutes=10, id='tips_auto_fetch')
+ai_scheduler.start()
+print("📰🤖 Binance Square Scraper + AI scheduler started (runs every 15 minutes)")
+print("    ├─ Step 1: Scrape Binance Square for each coin's hashtag (e.g., #BTC, #ETH)")
+print("    └─ Step 2: Make AI decisions for all coins based on scraped posts")
+print("🎯 Tips Auto-fetch scheduler started (runs every 10 minutes)")
+print(f"⏰ First news+AI run will occur within 15 minutes (started at {scheduler_start_time.strftime('%H:%M:%S UTC')})")
+
+# Run tips fetch once on startup (in background thread to not block server start)
+import threading
+def initial_tips_fetch():
+    import time
+    time.sleep(5)  # Wait 5 seconds for server to fully start
+    print("\n[TipsScheduler] Running initial tips fetch on startup...")
+    tips_scheduled_job()
+
+tips_startup_thread = threading.Thread(target=initial_tips_fetch, daemon=True)
+tips_startup_thread.start()
 
 
 @app.post('/api/runs/refresh')
 def api_runs_refresh():
-    # Force a news fetch + decision run now
+    """Force a complete news fetch + AI decision cycle now (for testing)"""
     try:
-        scheduled_job()
-        return {'ok': True, 'message': 'News fetch and AI analysis completed successfully'}
+        print("\n🔄 MANUAL REFRESH TRIGGERED")
+        news_and_ai_job()
+        return {'ok': True, 'message': 'News fetch + AI decisions completed successfully'}
     except Exception as e:
         print(f"[Force Refresh] Error: {e}")
         import traceback
@@ -1610,12 +2342,83 @@ def api_watchlist_remove(symbol: str, db: Session = Depends(get_db)):
 
 
 @app.get('/api/portfolio/{coin}')
-def api_portfolio_coin(coin: str, db: Session = Depends(get_db)):
-    """Get portfolio data for a specific coin"""
+def api_portfolio_coin(coin: str, test_mode: bool = False, db: Session = Depends(get_db)):
+    """Get portfolio data for a specific coin (real or test mode)"""
     try:
         # Normalize coin symbol (e.g., BTC -> BTC, BTCUSDT -> BTC)
         asset = coin.upper().replace('USDT', '')
         symbol = f"{asset}USDT"
+        
+        # If test mode, return test portfolio data
+        if test_mode:
+            portfolio = db.query(TestPortfolio).filter(TestPortfolio.coin == asset).first()
+            if not portfolio:
+                # Initialize with $10,000 ALREADY INVESTED in the coin
+                current_price = binance.get_current_price(symbol) or 0.0
+                if current_price > 0:
+                    initial_investment = 10000.0
+                    coin_quantity = initial_investment / current_price
+                    
+                    # Create portfolio with coins already purchased
+                    portfolio = TestPortfolio(
+                        coin=asset,
+                        usdt_balance=0.0,  # All USDT used to buy coins
+                        coin_balance=coin_quantity,
+                        total_invested=initial_investment,
+                        total_withdrawn=0.0,
+                        realized_profit=0.0
+                    )
+                    db.add(portfolio)
+                    db.commit()
+                    db.refresh(portfolio)
+                    
+                    # Record the initial purchase
+                    initial_trade = TestTrade(
+                        coin=asset,
+                        side='BUY',
+                        quantity=coin_quantity,
+                        price=current_price,
+                        usdt_amount=initial_investment
+                    )
+                    db.add(initial_trade)
+                    db.commit()
+                    
+                    print(f"✅ Initialized {asset} test portfolio: {coin_quantity:.8f} {asset} @ ${current_price:,.2f}")
+                else:
+                    # Fallback if price unavailable
+                    portfolio = TestPortfolio(coin=asset, usdt_balance=10000.0, coin_balance=0.0)
+                    db.add(portfolio)
+                    db.commit()
+                    db.refresh(portfolio)
+            
+            # Get current price
+            current_price = binance.get_current_price(symbol) or 0.0
+            
+            # Calculate metrics
+            position_value = portfolio.coin_balance * current_price
+            total_portfolio_value = portfolio.usdt_balance + position_value
+            unrealized_pnl = position_value - (portfolio.total_invested - portfolio.total_withdrawn) if portfolio.coin_balance > 0 else 0
+            total_pnl = portfolio.realized_profit + unrealized_pnl
+            initial_capital = 10000.0
+            performance = ((total_portfolio_value - initial_capital) / initial_capital * 100) if initial_capital > 0 else 0
+            
+            return {
+                'ok': True,
+                'test_mode': True,
+                'totalPnL': total_pnl,
+                'positionValue': position_value,
+                'performance': performance,
+                'availableCapital': portfolio.usdt_balance,
+                'portfolioValue': total_portfolio_value,
+                'totalInvested': portfolio.total_invested,
+                'netDeposits': initial_capital,
+                'currentCapital': portfolio.usdt_balance,
+                'positionQuantity': portfolio.coin_balance,
+                'totalRealizedProfits': portfolio.realized_profit,
+                'totalUnrealizedGains': unrealized_pnl,
+                'totalGains': total_pnl,
+                'overallPerformance': performance
+            }
         
         # Get account info
         acct = binance.client.get_account()
@@ -1651,7 +2454,7 @@ def api_portfolio_coin(coin: str, db: Session = Depends(get_db)):
         
         # Calculate portfolio metrics
         # Get all trades for this symbol to calculate invested amount and realized profits
-        trades = db.query(Trade).filter(Trade.symbol == symbol).order_by(Trade.created_at).all()
+        trades = db.query(Trade).filter(Trade.symbol == symbol).order_by(Trade.executed_at).all()
         
         total_invested = 0.0
         total_realized_profits = 0.0
@@ -1727,14 +2530,126 @@ def api_portfolio_coin(coin: str, db: Session = Depends(get_db)):
 
 
 @app.get('/api/portfolio/{coin}/history')
-def api_portfolio_history(coin: str, db: Session = Depends(get_db)):
-    """Get P&L history for a specific coin for charting"""
+def api_portfolio_history(coin: str, test_mode: bool = False, db: Session = Depends(get_db)):
+    """Get P&L history for a specific coin for charting (real or test mode)"""
     try:
         asset = coin.upper().replace('USDT', '')
         symbol = f"{asset}USDT"
         
+        # If test mode, return test trade history with minute-by-minute P&L
+        if test_mode:
+            trades = db.query(TestTrade).filter(TestTrade.coin == asset).order_by(TestTrade.executed_at).all()
+            
+            if not trades:
+                return []
+            
+            # Calculate P&L at each minute interval
+            chart_data = []
+            portfolio_value = 10000.0  # Initial USDT
+            coin_holdings = 0.0
+            
+            # Get first and last trade times
+            first_trade_time = trades[0].executed_at
+            if first_trade_time.tzinfo is None:
+                first_trade_time = first_trade_time.replace(tzinfo=timezone.utc)
+            
+            current_time = datetime.now(timezone.utc)
+            
+            # Fetch historical prices from Binance (1-minute klines for last 2 hours)
+            try:
+                # Get 2 hours of 1-minute klines = 120 candles
+                klines = binance.client.get_klines(
+                    symbol=symbol,
+                    interval=Client.KLINE_INTERVAL_1MINUTE,
+                    limit=120
+                )
+                # Create price lookup: timestamp -> close price
+                price_lookup = {}
+                for kline in klines:
+                    # kline[0] is timestamp in ms, kline[4] is close price
+                    minute_time = datetime.fromtimestamp(kline[0] / 1000, tz=timezone.utc).replace(second=0, microsecond=0)
+                    price_lookup[minute_time] = float(kline[4])
+                
+                # Fallback to current price
+                current_price_value = binance.get_current_price(symbol) or 0.0
+            except Exception as e:
+                print(f"⚠️  Could not fetch historical prices for {symbol}: {e}")
+                # Fallback: use current price
+                try:
+                    current_price_value = binance.get_current_price(symbol) or 0.0
+                except:
+                    current_price_value = 0.0
+                price_lookup = {}
+            
+            # Limit to last 2 hours max to prevent timeout
+            start_time = max(first_trade_time, current_time - timedelta(hours=2))
+            
+            # Generate minute-by-minute timeline
+            current_minute = start_time.replace(second=0, microsecond=0)
+            trade_index = 0
+            
+            # Skip trades before start_time
+            while trade_index < len(trades):
+                trade_time = trades[trade_index].executed_at
+                if trade_time.tzinfo is None:
+                    trade_time = trade_time.replace(tzinfo=timezone.utc)
+                if trade_time < start_time:
+                    # Apply this trade to initial state
+                    if trades[trade_index].side == 'BUY':
+                        coin_holdings += trades[trade_index].quantity
+                        portfolio_value -= trades[trade_index].usdt_amount
+                    elif trades[trade_index].side == 'SELL':
+                        coin_holdings = 0
+                        portfolio_value += trades[trade_index].usdt_amount
+                    trade_index += 1
+                else:
+                    break
+            
+            while current_minute <= current_time:
+                # Apply all trades that happened before this minute
+                while trade_index < len(trades):
+                    trade = trades[trade_index]
+                    trade_time = trade.executed_at
+                    if trade_time.tzinfo is None:
+                        trade_time = trade_time.replace(tzinfo=timezone.utc)
+                    
+                    if trade_time <= current_minute:
+                        if trade.side == 'BUY':
+                            coin_holdings += trade.quantity
+                            portfolio_value -= trade.usdt_amount
+                        elif trade.side == 'SELL':
+                            coin_holdings = 0
+                            portfolio_value += trade.usdt_amount
+                        trade_index += 1
+                    else:
+                        break
+                
+                # Use historical price from lookup, fallback to current price
+                price_at_minute = price_lookup.get(current_minute, current_price_value)
+                
+                # Calculate portfolio value at this minute
+                total_value = portfolio_value + (coin_holdings * price_at_minute)
+                pnl = total_value - 10000.0
+                
+                chart_data.append({
+                    'time': current_minute.isoformat(),
+                    'pnl': round(pnl, 2),
+                    'value': round(total_value, 2)
+                })
+                
+                # Move to next minute
+                current_minute += timedelta(minutes=1)
+            
+            # Ensure we don't have too many points (limit to last 1440 minutes = 24 hours)
+            if len(chart_data) > 1440:
+                chart_data = chart_data[-1440:]
+            
+            # DON'T add current live point - only show established database points to avoid glitching
+            
+            return chart_data
+        
         # Get trades for this symbol
-        trades = db.query(Trade).filter(Trade.symbol == symbol).order_by(Trade.created_at).all()
+        trades = db.query(Trade).filter(Trade.symbol == symbol).order_by(Trade.executed_at).all()
         
         if not trades:
             return []
@@ -1997,5 +2912,209 @@ def api_portfolio_withdraw(request: DepositWithdrawRequest, db: Session = Depend
         'coin': request.coin,
         'amount': request.amount
     }
+
+
+# ==========================================
+# COMMUNITY TIPS ENDPOINTS
+# ==========================================
+
+@app.get('/api/tips')
+def api_get_tips(limit: int = 20, db: Session = Depends(get_db)):
+    """
+    Get trending community tips from Binance Square
+    Returns coins that users are enthusiastic about
+    """
+    try:
+        from .tips_service import get_top_tips
+        
+        tips = get_top_tips(db, limit=limit)
+        
+        return {
+            'ok': True,
+            'count': len(tips),
+            'tips': tips
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {
+            'ok': False,
+            'error': str(e),
+            'tips': []
+        }
+
+
+@app.post('/api/tips/refresh')
+def api_refresh_tips(db: Session = Depends(get_db)):
+    """
+    Manually trigger tips refresh
+    Scrapes Binance Square hashtags and updates tips
+    """
+    try:
+        import os
+        from .tips_service import fetch_and_analyze_tips
+        
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            return {
+                'ok': False,
+                'error': 'OPENAI_API_KEY not configured'
+            }
+        
+        fetch_and_analyze_tips(db, api_key)
+        
+        return {
+            'ok': True,
+            'message': 'Tips refreshed successfully'
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {
+            'ok': False,
+            'error': str(e)
+        }
+
+
+@app.get('/api/tips/{coin}')
+def api_get_tip_for_coin(coin: str, db: Session = Depends(get_db)):
+    """Get tip details for a specific coin"""
+    try:
+        from .models import CommunityTip
+        
+        tip = db.query(CommunityTip).filter(
+            CommunityTip.coin == coin.upper()
+        ).first()
+        
+        if not tip:
+            return {
+                'ok': False,
+                'error': f'No tip found for {coin}'
+            }
+        
+        return {
+            'ok': True,
+            'tip': tip.to_dict()
+        }
+    except Exception as e:
+        return {
+            'ok': False,
+            'error': str(e)
+        }
+
+
+# ==========================================
+# TRADING COINS ENDPOINTS
+# ==========================================
+
+@app.get('/api/coins')
+def api_get_all_coins(db: Session = Depends(get_db)):
+    """Get all trading coins (base + dynamic)"""
+    try:
+        from .coin_trainer import get_all_trading_coins
+        
+        coins = get_all_trading_coins(db)
+        
+        return {
+            'ok': True,
+            'count': len(coins),
+            'coins': coins
+        }
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {
+            'ok': False,
+            'error': str(e),
+            'coins': []
+        }
+
+
+@app.post('/api/coins/add')
+def api_add_trading_coin(coin: str, coin_name: str = None, db: Session = Depends(get_db)):
+    """
+    Add a new coin to trading list
+    Uses sentiment-based trading (no ML training)
+    
+    Args:
+        coin: Coin symbol (e.g., "ZEC")
+        coin_name: Full coin name (optional)
+    """
+    try:
+        from .coin_trainer import add_trading_coin
+        
+        # Validate coin symbol
+        coin = coin.upper().strip()
+        if not coin or len(coin) < 2:
+            return {
+                'ok': False,
+                'error': 'Invalid coin symbol'
+            }
+        
+        # Check if already exists
+        from .models import TradingCoin
+        existing = db.query(TradingCoin).filter(TradingCoin.coin == coin).first()
+        if existing:
+            return {
+                'ok': False,
+                'error': f'{coin} is already in your trading list'
+            }
+        
+        # Add coin (no ML training, just adds to database)
+        result = add_trading_coin(db, coin, coin_name)
+        
+        if not result['success']:
+            return {
+                'ok': False,
+                'error': result.get('recommendation', 'Failed to add coin')
+            }
+        
+        return {
+            'ok': True,
+            'message': f'{coin} added successfully with sentiment-based trading!',
+            'coin': result['coin'].to_dict(),
+            'ai_enabled': True,  # Always enabled (uses sentiment)
+            'recommendation': 'Sentiment-based trading enabled'
+        }
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {
+            'ok': False,
+            'error': str(e)
+        }
+
+
+@app.delete('/api/coins/{coin}')
+def api_remove_trading_coin(coin: str, db: Session = Depends(get_db)):
+    """Remove a coin from trading list"""
+    try:
+        from .models import TradingCoin
+        
+        coin = coin.upper()
+        trading_coin = db.query(TradingCoin).filter(TradingCoin.coin == coin).first()
+        
+        if not trading_coin:
+            return {
+                'ok': False,
+                'error': f'{coin} not found in trading list'
+            }
+        
+        db.delete(trading_coin)
+        db.commit()
+        
+        return {
+            'ok': True,
+            'message': f'{coin} removed from trading list'
+        }
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return {
+            'ok': False,
+            'error': str(e)
+        }
 
 

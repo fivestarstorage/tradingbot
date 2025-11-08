@@ -1,0 +1,96 @@
+# ML Trading System Configuration
+
+data:
+  exchange: "binance"
+  symbols:
+    - "BTC/USDT"
+    - "ETH/USDT"
+    - "SOL/USDT"
+    - "BNB/USDT"
+    - "XRP/USDT"
+    - "ADA/USDT"
+    - "AVAX/USDT"
+    - "DOT/USDT"
+    - "LINK/USDT"
+    - "MATIC/USDT"
+  timeframe: "1m"
+  history_days: 365  # Full year of data
+  min_daily_volume_usd: 10000000  # $10M minimum
+
+spike_detection:
+  zscore_threshold: 3.0
+  volume_multiplier: 5.0
+  forward_window: 240  # minutes to search for peak
+  lookback_window: 60  # minutes for baseline
+
+features:
+  indicators:
+    - rsi
+    - macd
+    - ema_cross
+    - bollinger_bands
+    - atr
+    - obv
+  rolling_windows: [5, 15, 30, 60]
+  include_volume: true
+  include_orderbook: false  # Future enhancement
+
+model:
+  type: "xgboost"  # xgboost, lightgbm, lstm
+  label_horizon: 10  # candles ahead (10 minutes)
+  label_threshold: 0.003  # 0.3% price increase = positive label
+  probability_threshold: 0.5  # 50/50 threshold
+  train_test_split: 0.8
+  validation_split: 0.1
+  features_to_use: "all"
+  hyperparameters:
+    max_depth: 6
+    learning_rate: 0.05
+    n_estimators: 100
+    subsample: 0.8
+    colsample_bytree: 0.8
+
+backtest:
+  transaction_fee: 0.001  # 0.1% per trade
+  slippage: 0.0005  # 0.05% slippage
+  start_balance: 10000
+  position_size_fraction: 0.02  # 2% of capital per trade
+  stop_loss: 0.015  # 1.5% stop loss
+  take_profit: 0.03  # 3% take profit
+  max_holding_periods: 480  # max 8 hours (480 minutes)
+  walk_forward:
+    enabled: true
+    train_days: 60
+    test_days: 7
+
+execution:
+  mode: "paper"  # paper, live
+  max_open_positions: 3
+  max_drawdown: 0.10  # 10%
+  risk_per_trade: 0.02  # 2% of capital
+  order_type: "limit"  # limit, market
+  retry_attempts: 3
+  rate_limit_delay: 0.1
+
+risk_management:
+  daily_max_loss: 0.03  # 3% of equity
+  max_consecutive_losses: 5
+  stop_trading_on_drawdown: 0.10
+  min_sharpe_ratio: 1.0
+  rebalance_threshold: 0.05
+
+monitoring:
+  log_all_trades: true
+  log_all_signals: true
+  alert_on_error: true
+  alert_on_large_loss: 0.02  # 2%
+  dashboard_port: 8001
+  metrics_interval_seconds: 60
+
+retraining:
+  enabled: true
+  frequency: "daily"  # daily, weekly
+  min_performance_threshold: 0.55  # win rate
+  auto_deploy: false  # manual approval required
+  keep_model_versions: 10
+

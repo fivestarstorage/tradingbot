@@ -1,0 +1,22 @@
+{
+  "coin": "VIRTUAL",
+  "symbol": "VIRTUALUSDT",
+  "model": "RandomForest",
+  "accuracy": 0.4937549130928465,
+  "training_samples": 45796,
+  "test_samples": 11449,
+  "data_range": "2025-04-11 18:05:00 to 2025-10-27 12:25:00",
+  "features": [
+    "rsi",
+    "macd",
+    "macd_signal",
+    "ema_20",
+    "ema_50",
+    "bb_high",
+    "bb_low",
+    "price_change_1h",
+    "price_change_4h",
+    "volume_change"
+  ],
+  "trained_at": "2025-10-27T23:26:25.286123"
+}

@@ -1,0 +1,79 @@
+[
+  {
+    "symbol": "XRPUSDT",
+    "best_result": {
+      "symbol": "XRPUSDT",
+      "model": "RandomForest",
+      "train_accuracy": 0.8878392305049811,
+      "test_accuracy": 0.7462513076833662,
+      "total_return": 0.0,
+      "final_value": 10000,
+      "num_trades": 0,
+      "win_rate": 0,
+      "avg_win": 0,
+      "avg_loss": 0,
+      "profit_factor": 0,
+      "expectancy": 0,
+      "sharpe_ratio": 0,
+      "max_drawdown": 0.0,
+      "buy_hold_return": 4.138467522364839,
+      "outperformance": -4.138467522364839
+    },
+    "all_results": [
+      {
+        "symbol": "XRPUSDT",
+        "model": "RandomForest",
+        "train_accuracy": 0.8878392305049811,
+        "test_accuracy": 0.7462513076833662,
+        "total_return": 0.0,
+        "final_value": 10000,
+        "num_trades": 0,
+        "win_rate": 0,
+        "avg_win": 0,
+        "avg_loss": 0,
+        "profit_factor": 0,
+        "expectancy": 0,
+        "sharpe_ratio": 0,
+        "max_drawdown": 0.0,
+        "buy_hold_return": 4.138467522364839,
+        "outperformance": -4.138467522364839
+      },
+      {
+        "symbol": "XRPUSDT",
+        "model": "GradientBoosting",
+        "train_accuracy": 0.9087942287873583,
+        "test_accuracy": 0.7298616761594793,
+        "total_return": -0.7914160922099842,
+        "final_value": 2085.8390779001584,
+        "num_trades": 34,
+        "win_rate": 0.6176470588235294,
+        "avg_win": 0.03122917472647137,
+        "avg_loss": -0.033941302682706176,
+        "profit_factor": 1.4863050153347181,
+        "expectancy": 0.006311051011197605,
+        "sharpe_ratio": -3.909893803896406,
+        "max_drawdown": -0.7914160922099842,
+        "buy_hold_return": 4.138467522364839,
+        "outperformance": -4.929883614574823
+      },
+      {
+        "symbol": "XRPUSDT",
+        "model": "NeuralNet",
+        "train_accuracy": 0.9714874613534867,
+        "test_accuracy": 0.7460188306404743,
+        "total_return": -0.4871046032505119,
+        "final_value": 5128.953967494881,
+        "num_trades": 13,
+        "win_rate": 0.3076923076923077,
+        "avg_win": 0.02168271362753438,
+        "avg_loss": -0.00946941242462975,
+        "profit_factor": 1.0176726052370981,
+        "expectancy": 0.00011585712988229115,
+        "sharpe_ratio": -3.5296373630316245,
+        "max_drawdown": -0.4871046032505119,
+        "buy_hold_return": 4.138467522364839,
+        "outperformance": -4.625572125615351
+      }
+    ]
+  }
+]

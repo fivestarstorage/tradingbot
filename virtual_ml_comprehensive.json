@@ -1,0 +1,117 @@
+{
+  "coin": "VIRTUAL",
+  "best_config": {
+    "strategy": "1h_5pct",
+    "features": "comprehensive",
+    "model": "RandomForest",
+    "accuracy": 0.9897386423434485,
+    "precision": 0.8636363636363636,
+    "recall": 0.14285714285714285,
+    "f1": 0.24516129032258063,
+    "feature_count": 17
+  },
+  "top_10": [
+    {
+      "strategy": "1h_5pct",
+      "features": "comprehensive",
+      "model": "RandomForest",
+      "accuracy": 0.9897386423434485,
+      "precision": 0.8636363636363636,
+      "recall": 0.14285714285714285,
+      "f1": 0.24516129032258063,
+      "feature_count": 17
+    },
+    {
+      "strategy": "1h_5pct",
+      "features": "comprehensive",
+      "model": "LogisticRegression",
+      "accuracy": 0.9892124188738818,
+      "precision": 0.6785714285714286,
+      "recall": 0.14285714285714285,
+      "f1": 0.2360248447204969,
+      "feature_count": 17
+    },
+    {
+      "strategy": "1h_5pct",
+      "features": "momentum",
+      "model": "LogisticRegression",
+      "accuracy": 0.9887738993159095,
+      "precision": 1.0,
+      "recall": 0.03759398496240601,
+      "f1": 0.07246376811594203,
+      "feature_count": 8
+    },
+    {
+      "strategy": "1h_5pct",
+      "features": "basic",
+      "model": "LogisticRegression",
+      "accuracy": 0.9885107875811261,
+      "precision": 1.0,
+      "recall": 0.015037593984962405,
+      "f1": 0.02962962962962963,
+      "feature_count": 5
+    },
+    {
+      "strategy": "1h_5pct",
+      "features": "volatility",
+      "model": "LogisticRegression",
+      "accuracy": 0.9884230836695317,
+      "precision": 0.5128205128205128,
+      "recall": 0.15037593984962405,
+      "f1": 0.23255813953488372,
+      "feature_count": 7
+    },
+    {
+      "strategy": "1h_5pct",
+      "features": "basic",
+      "model": "AdaBoost",
+      "accuracy": 0.9883353797579372,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "feature_count": 5
+    },
+    {
+      "strategy": "1h_5pct",
+      "features": "momentum",
+      "model": "RandomForest",
+      "accuracy": 0.9883353797579372,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "feature_count": 8
+    },
+    {
+      "strategy": "1h_5pct",
+      "features": "momentum",
+      "model": "ExtraTrees",
+      "accuracy": 0.9883353797579372,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "feature_count": 8
+    },
+    {
+      "strategy": "1h_5pct",
+      "features": "momentum",
+      "model": "AdaBoost",
+      "accuracy": 0.9883353797579372,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "feature_count": 8
+    },
+    {
+      "strategy": "1h_5pct",
+      "features": "trend",
+      "model": "AdaBoost",
+      "accuracy": 0.9883353797579372,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "feature_count": 8
+    }
+  ],
+  "total_tested": 392,
+  "timestamp": "2025-10-28T02:15:56.472684"
+}
